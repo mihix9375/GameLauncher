@@ -25,16 +25,7 @@ async function loadGames()
 			btn.textContent = "起動する";
 
 			btn.addEventListener("click", async () => {
-				try {
-					const result = await invoke("launch");
-
-					console.log(result);
-					alert(result);
-				}
-				catch (error)
-				{
-					console.error("エラー: ", error);
-				}
+				await launch(game.id);
 			});
 
 			card.appendChild(image);
@@ -49,6 +40,20 @@ async function loadGames()
 	{
 		console.error("ゲーム情報の表示に失敗しました。");
 		alert("ゲーム情報の表示に失敗しました。");
+	}
+}
+
+async function launch(id)
+{
+	try {
+		const result = await invoke("launch");
+
+		console.log(result);
+		alert(result);
+	}
+	catch (error)
+	{
+		console.error("エラー: ", error);
 	}
 }
 

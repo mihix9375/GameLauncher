@@ -1,19 +1,160 @@
 <!doctype html>
-<html lang="en">
-  	<head>
-    	<meta charset="UTF-8" />
-    	<link rel="stylesheet" href="styles.css" />
-    	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    	<title>ゲームランチャー</title>
-    	<script type="module" src="/main.js" defer></script>
-  	</head>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ゲームランチャー - ゲーム開発研究部</title>
+    <!-- Google Fonts for Modern Premium Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="/main.js" defer></script>
+  </head>
 
-  	<body>
-    	<main class="container">
-      	<h1 class="align-center">ゲーム開発研究部 製作物</h1>
-	
-		<div id="game-list" class="game-grid align-left"></div>
+  <body>
+    <!-- Ambient Background Glows & Mesh -->
+    <div class="ambient-background">
+      <div class="glow-orb orb-primary"></div>
+      <div class="glow-orb orb-secondary"></div>
+      <div class="glow-orb orb-accent"></div>
+    </div>
 
-		<button class="btn none-bg align-right">⚙️</button>
-	</body>
+    <!-- Main Layout Container -->
+    <div class="app-layout">
+      <!-- Top Header -->
+      <header class="app-header">
+        <div class="header-brand">
+          <div class="brand-logo">
+            <img src="assets/logo.png" alt="KPad Logo" class="logo-img" />
+          </div>
+          <div class="brand-text">
+            <h1 class="app-title">ゲーム開発研究部 <span class="title-highlight">製作物</span></h1>
+            <p class="app-subtitle">KPad</p>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Scrollable Content Area (Matching pepi ScrollViewer & CardRegion) -->
+      <main class="main-content" id="main-scroll">
+        <div class="section-header">
+          <div class="header-title-group">
+            <h2>タイトル一覧</h2>
+            <span class="item-count" id="game-count">(0)</span>
+          </div>
+          <div class="filter-tools">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="search-input" class="search-input" placeholder="タイトルやタグで検索..." />
+            </div>
+          </div>
+        </div>
+
+        <!-- 3-Column Uniform Grid for Game Cards -->
+        <div id="game-list" class="game-grid">
+          <!-- Game cards inserted dynamically via main.js -->
+        </div>
+      </main>
+
+      <!-- Bottom Log / Status Bar (Matching pepi LogBG & LogText) -->
+      <footer class="log-bar">
+        <div class="log-icon-wrap">
+          <span class="log-icon">ℹ️</span>
+        </div>
+        <div class="log-content">
+          <span id="log-text" class="log-text">準備完了 - ランチャー待機中</span>
+        </div>
+        <div class="log-time" id="log-time">--:--</div>
+      </footer>
+
+      <!-- Floating Action Controls (Matching pepi UpdateButton & Settings Button) -->
+      <div class="floating-controls">
+        <button id="btn-refresh" class="fab-btn update-btn" title="情報を更新 (Update)">
+          <span class="fab-icon">🔄</span>
+        </button>
+        <button id="btn-settings" class="fab-btn settings-btn" title="設定 (Settings)">
+          <span class="fab-icon">⚙️</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Game Detail Modal Overlay (Matching pepi Detail.xaml) -->
+    <div id="detail-modal" class="modal-overlay hidden">
+      <div class="modal-backdrop" id="modal-backdrop"></div>
+      <div class="modal-container glass-panel">
+        <button id="btn-close-modal" class="btn-close" title="閉じる (Exit)">✕</button>
+        
+        <!-- Large Banner Image Area -->
+        <div class="modal-header-banner" id="modal-banner">
+          <div class="banner-gradient"></div>
+          <div class="banner-content">
+            <div class="modal-tags" id="modal-tags"></div>
+            <h2 id="modal-title" class="modal-title">ゲームタイトル</h2>
+            <div class="modal-meta-badges">
+              <span id="modal-version" class="meta-badge version-badge">v1.0.0</span>
+              <span id="modal-author" class="meta-badge author-badge">ゲーム開発研究部</span>
+              <span id="modal-date" class="meta-badge date-badge">2026/07/07</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Body: Description & Play Button -->
+        <div class="modal-body">
+          <div class="modal-left">
+            <div class="description-box glass-inset">
+              <h4 class="box-title">📖 ゲーム概要 (Description)</h4>
+              <p id="modal-description" class="description-text">
+                説明文がここに入ります。
+              </p>
+            </div>
+          </div>
+
+          <div class="modal-right">
+            <div class="launch-card glass-inset">
+              <div class="launch-info">
+                <span class="launch-label">ステータス</span>
+                <span class="launch-status ready">🟢 起動可能</span>
+              </div>
+              <button id="btn-launch-game" class="btn-launch primary-glow">
+                <span class="btn-icon">▶</span>
+                <span class="btn-text">起動する (Play)</span>
+              </button>
+              <p class="launch-note">クリックでゲームアプリケーションを開始します</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Modal Overlay (Keeping Settings Button functionality) -->
+    <div id="settings-modal" class="modal-overlay hidden">
+      <div class="modal-backdrop" id="settings-backdrop"></div>
+      <div class="modal-container settings-container glass-panel">
+        <div class="settings-header">
+          <h3>⚙️ ランチャー設定 (Settings)</h3>
+          <button id="btn-close-settings" class="btn-close">✕</button>
+        </div>
+        <div class="settings-body">
+          <div class="setting-item">
+            <label>接続先サーバー (gRPC / HTTP)</label>
+            <input type="text" value="http://[::1]:50050" readonly class="setting-input" />
+          </div>
+          <div class="setting-item">
+            <label>ゲーム保存先ディレクトリ</label>
+            <input type="text" value="AppData/Roaming/gamelauncher/games" readonly class="setting-input" />
+          </div>
+          <div class="setting-item">
+            <label>ビジュアル効果設定</label>
+            <div class="toggle-switch-wrap">
+              <input type="checkbox" id="anim-toggle" checked />
+              <label for="anim-toggle">リッチグラスモーフィズムとアニメーションを有効化</label>
+            </div>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button id="btn-save-settings" class="btn-save primary-glow">設定を保存して閉じる</button>
+        </div>
+      </div>
+    </div>
+  </body>
 </html>

@@ -15,7 +15,6 @@ name = "gamelauncher_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-prost-build = "0.14.3"
 tauri-build = { version = "2", features = [] }
 tonic-prost-build = "0.14.6"
 
@@ -26,4 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tonic = "0.14.6"
 prost = "0.14.3"
-
+tonic-prost = "0.14.6"
+tokio = "1.52.3"
+zip = "8.6.0"
+ripunzip = "2.0.3"

@@ -5,16 +5,29 @@ import { setLogText } from "../ui/log.js";
 
 export async function openDetailModal(game, meta) {
 	setSelectedGame(game);
+	const merged = Object.assign({}, meta || {}, game);
 
-	document.getElementById("modal-title").textContent = game.title;
-	document.getElementById("modal-version").textContent = game.version || "v1.0.0";
-	document.getElementById("modal-author").textContent = meta.author || "ゲーム開発研究部";
-	document.getElementById("modal-date").textContent = meta.lastUpdate || "2026/07/07";
-	document.getElementById("modal-description").textContent = meta.description;
+	document.getElementById("modal-title").textContent = merged.title || game.title;
+	document.getElementById("modal-version").textContent = merged.version || game.version || "v1.0.0";
+	document.getElementById("modal-author").textContent = merged.author || "ゲーム開発研究部";
+	document.getElementById("modal-date").textContent = merged.latest_update || merged.latestUpdate || merged.lastUpdate || "2026/07/07";
+	document.getElementById("modal-description").textContent = merged.description || "説明文はありません。";
+
+	const bannerEl = document.getElementById("modal-banner");
+	if (bannerEl) {
+		if (game.image && game.image.length > 5) {
+			bannerEl.style.backgroundImage = `url("${game.image}")`;
+			bannerEl.style.backgroundSize = "cover";
+			bannerEl.style.backgroundPosition = "center";
+		} else {
+			bannerEl.style.backgroundImage = "";
+		}
+	}
 
 	const modalTags = document.getElementById("modal-tags");
 	modalTags.innerHTML = "";
-	meta.tags.forEach(tagText => {
+	const tagsList = (Array.isArray(merged.tags) && merged.tags.length > 0) ? merged.tags : ["ゲーム"];
+	tagsList.forEach(tagText => {
 		const tag = document.createElement("span");
 		tag.className = "tag-pill";
 		tag.textContent = tagText;
@@ -27,7 +40,7 @@ export async function openDetailModal(game, meta) {
 	if (window.__TAURI__) {
 		try {
 			setLogText(`${game.title} の更新をチェック中...`);
-			const res = await invoke("check_version", { version: game.version || "v1.0.0", id: game.id });
+			const res = await invoke("check_version", { version: game.version || "0.0.0", gameId: (game.id || game.game || "").replace(".exe", "") });
 			if (res && res.is_update_available) {
 				game._needsUpdate = true;
 				game._latestVersion = res.latest_version;
@@ -39,7 +52,11 @@ export async function openDetailModal(game, meta) {
 				}
 				const launchBtn = document.getElementById("btn-launch-game");
 				if (launchBtn) {
-					launchBtn.innerHTML = `<span class="btn-icon">⬇</span><span class="btn-text">更新して起動 (Update & Play)</span>`;
+					if (!game.isInstalled) {
+						launchBtn.innerHTML = `<span class="btn-icon">⬇</span><span class="btn-text">ダウンロード (Download)</span>`;
+					} else {
+						launchBtn.innerHTML = `<span class="btn-icon">🔄</span><span class="btn-text">更新する (Update)</span>`;
+					}
 				}
 			} else {
 				game._needsUpdate = false;

@@ -1,7 +1,6 @@
 use serde::Serialize;
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 use crate::env::gamelauncher::VersionRequest;
-use crate::env::gamelauncher::game_service_client::GameServiceClient;
 
 #[derive(Serialize)]
 pub struct SerializedVersionResponse
@@ -13,13 +12,14 @@ pub struct SerializedVersionResponse
 #[tauri::command]
 pub async fn check_version(
 	version: String,
-	id: String,
-	client_state: tauri::State<'_, GameServiceClient<Channel>>,
+	game_id: String,
 ) -> Result<SerializedVersionResponse, String> {
-	let mut client = client_state.inner().clone();
+	let url = crate::env::get_config().server_url;
+	let mut client = crate::env::connect_and_get_client(url);
+	let clean_id = game_id.trim_end_matches(".exe");
 
 	let request = Request::new(VersionRequest {
-		 game_id: id,
+		 game_id: clean_id.to_string(),
 		 current_version: version,
 	});
 

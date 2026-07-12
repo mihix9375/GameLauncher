@@ -28,4 +28,7 @@ prost = "0.14.3"
 tonic-prost = "0.14.6"
 tokio = "1.52.3"
 zip = "8.6.0"
+ipconfig = "0.3"
 ripunzip = "2.0.3"
+base64 = "0.22"
+

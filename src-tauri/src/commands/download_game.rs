@@ -1,10 +1,7 @@
-use tonic::{
-	Request, transport::Channel
-};
+use tonic::Request;
 use crate::env::gamelauncher::{
 	DownloadRequest
 };
-use crate::env::gamelauncher::game_service_client::GameServiceClient;
 use tokio::io::AsyncWriteExt;
 
 #[tauri::command]
@@ -12,14 +9,12 @@ pub async fn download_game
 (
 	game_id: String, 
 	version: String,
-	client_state: tauri::State<'_, GameServiceClient<Channel>>,
 ) -> Result<(), String>
 {
-	let games_path 	 = crate::env::get_games_path();
-	let game_path  	 = games_path?.join(&game_id);
-	let mut zip_name = game_id.clone();
-	zip_name.push_str(".zip");
-	let zip_path 	 = game_path.join(zip_name);
+	let games_path 	 = crate::env::get_games_path()?;
+	let clean_id     = game_id.trim_end_matches(".exe");
+	let game_path  	 = games_path.join(clean_id);
+	let zip_path 	 = game_path.join(format!("{}.zip", clean_id));
 
 	if let Some(parent) = std::path::Path::new(&zip_path).parent() {
 		tokio::fs::create_dir_all(parent)
@@ -27,10 +22,11 @@ pub async fn download_game
 			.map_err(|e| e.to_string())?;
 	}
 
-	let mut client = client_state.inner().clone();
+	let url = crate::env::get_config().server_url;
+	let mut client = crate::env::connect_and_get_client(url);
 
 	let request = Request::new(DownloadRequest {
-		game_id: game_id,
+		game_id: clean_id.to_string(),
 		version: version,
 	});
 
@@ -42,7 +38,8 @@ pub async fn download_game
 
 	let mut file = tokio::fs::OpenOptions::new()
 		.create(true)
-		.append(true)
+		.write(true)
+		.truncate(true)
 		.open(&zip_path)
 		.await
 		.map_err(|e| e.to_string())?;
@@ -73,7 +70,7 @@ pub async fn download_game
 		Ok(())
 	})
 	.await
-	.map_err(|e| e.to_string())?;
+	.map_err(|e| e.to_string())??;
 
 	Ok(())
 }

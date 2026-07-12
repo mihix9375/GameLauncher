@@ -41,3 +41,24 @@ export function setSelectedGame(game) {
 export function getMockMetadata() {
 	return MOCK_METADATA;
 }
+
+export function setGameUpdateFlag(gameId, version) {
+	const game = allGames.find(g => g.id === gameId || g.game === gameId);
+	if (game) {
+		game.hasUpdate = true;
+		game._needsUpdate = true;
+		if (version) game._latestVersion = version;
+	} else {
+		allGames.push({
+			id: gameId,
+			game: gameId,
+			title: gameId,
+			version: "未インストール",
+			isInstalled: false,
+			hasUpdate: true,
+			_needsUpdate: true,
+			_latestVersion: version,
+			image: "3"
+		});
+	}
+}

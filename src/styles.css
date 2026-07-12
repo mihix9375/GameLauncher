@@ -421,6 +421,50 @@ body {
   box-shadow: 0 4px 10px rgba(249, 115, 22, 0.25);
 }
 
+.card-actions-wrap {
+  margin-top: 20px;
+  display: flex;
+  width: 100%;
+}
+
+.card-action-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 14px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.card-action-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.15);
+}
+
+.card-action-btn.play-btn {
+  background: linear-gradient(135deg, var(--accent-blue), #1d4ed8);
+  color: #FFFFFF;
+}
+
+.card-action-btn.update-btn {
+  background: linear-gradient(135deg, var(--accent-orange), var(--accent-gold));
+  color: #FFFFFF;
+  animation: pulse-glow 2s infinite;
+}
+
+.card-action-btn.download-btn {
+  background: linear-gradient(135deg, var(--accent-green), #059669);
+  color: #FFFFFF;
+}
+
 /* Bottom Log / Status Bar (Matching pepi LogBG / LogText) */
 .log-bar {
   position: fixed;
@@ -834,4 +878,10 @@ body {
 .btn-save:hover {
   transform: scale(1.05);
   box-shadow: 0 6px 20px rgba(37, 99, 235, 0.35);
+}
+
+body.no-animations * {
+  animation: none !important;
+  transition: none !important;
+  backdrop-filter: none !important;
 }

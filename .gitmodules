@@ -1,0 +1,3 @@
+[submodule "src-tauri/proto"]
+	path = src-tauri/proto
+	url = https://github.com/mihix9375/proto

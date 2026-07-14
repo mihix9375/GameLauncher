@@ -22,7 +22,7 @@ pub async fn sync_updates
 		let mut stream = response.into_inner();
 
 		while let Ok(Ok(Some(notice))) = tokio::time::timeout(
-			std::time::Duration::from_millis(600),
+			std::time::Duration::from_millis(1500),
 			stream.message(),
 		).await {
 			let _ = app_handle.emit("update_notice", serde_json::json!({

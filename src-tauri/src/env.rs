@@ -57,11 +57,15 @@ pub fn normalize_server_url(url: &str) -> String {
 	result
 }
 
-pub fn get_config() -> ClientConfig {
-	if let Ok(base) = get_base_path() {
+pub fn get_config() -> ClientConfig
+{
+	if let Ok(base) = get_base_path()
+	{
 		let config_file = base.join("config.json");
-		if let Ok(content) = fs::read_to_string(&config_file) {
-			if let Ok(mut cfg) = serde_json::from_str::<ClientConfig>(&content) {
+		if let Ok(content) = fs::read_to_string(&config_file)
+		{
+			if let Ok(mut cfg) = serde_json::from_str::<ClientConfig>(&content)
+			{
 				cfg.server_url = normalize_server_url(&cfg.server_url);
 				return cfg;
 			}
@@ -70,7 +74,8 @@ pub fn get_config() -> ClientConfig {
 	ClientConfig::default()
 }
 
-pub fn save_config(mut cfg: ClientConfig) -> Result<(), String> {
+pub fn save_config(mut cfg: ClientConfig) -> Result<(), String>
+{
 	let base = get_base_path()?;
 	let config_file = base.join("config.json");
 	cfg.server_url = normalize_server_url(&cfg.server_url);
@@ -92,9 +97,12 @@ pub fn get_base_path() -> Result<PathBuf, String>
 pub fn get_games_path() -> Result<PathBuf, String>
 {
 	let cfg = get_config();
-	let data_path = if !cfg.games_path.trim().is_empty() {
+	let data_path = if !cfg.games_path.trim().is_empty()
+	{
 		PathBuf::from(cfg.games_path.trim())
-	} else {
+	}
+	else
+	{
 		let mut base = get_base_path()?;
 		base.push("games");
 		base
@@ -108,11 +116,17 @@ pub fn get_games_path() -> Result<PathBuf, String>
 pub fn connect_and_get_client(url: String) -> GameServiceClient<Channel> 
 {
 	let url = normalize_server_url(&url);
-	let endpoint = match Endpoint::from_shared(url) {
+	let endpoint = match Endpoint::from_shared(url)
+	{
 		Ok(ep) => ep,
 		Err(_) => Endpoint::from_static("http://[::1]:50050"),
 	};
-	let channel = endpoint.connect_lazy();
+	let configured_endpoint = endpoint
+		.initial_stream_window_size(Some(1024 * 1024 * 16))
+		.initial_connection_window_size(Some(1024 * 1024 * 32))
+		.http2_adaptive_window(true)
+		.tcp_nodelay(true);
+	let channel = configured_endpoint.connect_lazy();
 
 	GameServiceClient::new(channel)
 }

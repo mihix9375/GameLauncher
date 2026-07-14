@@ -23,11 +23,46 @@ impl Default for ClientConfig {
 	}
 }
 
+pub fn normalize_server_url(url: &str) -> String {
+	let u = url.trim();
+	if u.is_empty() {
+		return "http://[::1]:50050".to_string();
+	}
+	let scheme_removed = if let Some(s) = u.strip_prefix("http://") {
+		s
+	} else if let Some(s) = u.strip_prefix("https://") {
+		s
+	} else {
+		u
+	};
+	let has_port = if scheme_removed.starts_with('[') {
+		if let Some(bracket_end) = scheme_removed.find(']') {
+			scheme_removed[bracket_end..].contains(':')
+		} else {
+			false
+		}
+	} else {
+		scheme_removed.contains(':')
+	};
+
+	let mut result = if u.starts_with("http://") || u.starts_with("https://") {
+		u.to_string()
+	} else {
+		format!("http://{}", u)
+	};
+
+	if !has_port {
+		result.push_str(":50050");
+	}
+	result
+}
+
 pub fn get_config() -> ClientConfig {
 	if let Ok(base) = get_base_path() {
 		let config_file = base.join("config.json");
 		if let Ok(content) = fs::read_to_string(&config_file) {
-			if let Ok(cfg) = serde_json::from_str::<ClientConfig>(&content) {
+			if let Ok(mut cfg) = serde_json::from_str::<ClientConfig>(&content) {
+				cfg.server_url = normalize_server_url(&cfg.server_url);
 				return cfg;
 			}
 		}
@@ -38,14 +73,7 @@ pub fn get_config() -> ClientConfig {
 pub fn save_config(mut cfg: ClientConfig) -> Result<(), String> {
 	let base = get_base_path()?;
 	let config_file = base.join("config.json");
-	let mut url = cfg.server_url.trim().to_string();
-	if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") {
-		url = format!("http://{}", url);
-	}
-	if url.is_empty() {
-		url = "http://[::1]:50050".to_string();
-	}
-	cfg.server_url = url;
+	cfg.server_url = normalize_server_url(&cfg.server_url);
 	let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
 	fs::write(&config_file, json).map_err(|e| e.to_string())?;
 	Ok(())
@@ -77,15 +105,9 @@ pub fn get_games_path() -> Result<PathBuf, String>
 	Ok(data_path)
 }
 
-pub fn connect_and_get_client(mut url: String) -> GameServiceClient<Channel> 
+pub fn connect_and_get_client(url: String) -> GameServiceClient<Channel> 
 {
-	url = url.trim().to_string();
-	if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") {
-		url = format!("http://{}", url);
-	}
-	if url.is_empty() {
-		url = "http://[::1]:50050".to_string();
-	}
+	let url = normalize_server_url(&url);
 	let endpoint = match Endpoint::from_shared(url) {
 		Ok(ep) => ep,
 		Err(_) => Endpoint::from_static("http://[::1]:50050"),
@@ -108,7 +130,7 @@ where
 	Ok(opt.unwrap_or_default())
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Meta
 {
 	#[serde(default, deserialize_with = "null_to_default")]

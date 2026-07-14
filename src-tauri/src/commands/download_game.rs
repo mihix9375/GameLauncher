@@ -57,16 +57,40 @@ pub async fn download_game
 	let zip_path_clone = zip_path.clone();
 	let game_path_clone = game_path.clone();
 	tokio::task::spawn_blocking(move || -> Result<(), String> {
-		let zip_file = std::fs::File::open(&zip_path_clone).map_err(|e| e.to_string())?;
-		let engine = ripunzip::UnzipEngine::for_file(zip_file).map_err(|e| e.to_string())?;
-		let options = ripunzip::UnzipOptions {
-			output_directory: Some(game_path_clone),
-			password: None,
-			single_threaded: false,
-			filename_filter: None,
-			progress_reporter: Box::new(ripunzip::NullProgressReporter),
-		};
-		engine.unzip(options).map_err(|e| e.to_string())?;
+		use zip::ZipArchive;
+		use std::fs::File;
+		use std::path::Path;
+
+		let zip_file = File::open(&zip_path_clone).map_err(|e| e.to_string())?;
+		let mut archive = ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
+
+		for i in 0..archive.len() {
+			let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+			let raw_name = file.name_raw();
+			let decoded_name = if let Ok(s) = std::str::from_utf8(raw_name) {
+				s.to_string()
+			} else {
+				let (cow, _, _) = encoding_rs::SHIFT_JIS.decode(raw_name);
+				cow.into_owned()
+			};
+
+			let mut outpath = game_path_clone.clone();
+			for component in Path::new(&decoded_name).components() {
+				if let std::path::Component::Normal(c) = component {
+					outpath.push(c);
+				}
+			}
+
+			if file.is_dir() || decoded_name.ends_with('/') || decoded_name.ends_with('\\') {
+				let _ = std::fs::create_dir_all(&outpath);
+			} else {
+				if let Some(parent) = outpath.parent() {
+					let _ = std::fs::create_dir_all(parent);
+				}
+				let mut outfile = File::create(&outpath).map_err(|e| e.to_string())?;
+				std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+			}
+		}
 		Ok(())
 	})
 	.await

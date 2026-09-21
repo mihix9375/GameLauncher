@@ -121,6 +121,17 @@ pub fn close_game(
 	result
 }
 
+pub fn shutdown_app(app_handle: &AppHandle)
+{
+	let process_state = app_handle.state::<GameProcessState>();
+	let _ = terminate_current_game(process_state.inner());
+	if let Some(overlay) = app_handle.get_webview_window("game-overlay")
+	{
+		let _ = overlay.destroy();
+	}
+	app_handle.exit(0);
+}
+
 fn show_overlay(app_handle: &AppHandle) -> Result<(), String>
 {
 	let overlay = app_handle

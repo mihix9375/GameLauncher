@@ -49,6 +49,8 @@ export function setupEventListeners() {
 					if (cfg) {
 						const urlEl = document.getElementById("setting-server-url");
 						if (urlEl) urlEl.value = cfg.server_url || "http://[::1]:50050";
+						const leaderboardUrlEl = document.getElementById("setting-leaderboard-url");
+						if (leaderboardUrlEl) leaderboardUrlEl.value = cfg.leaderboard_url || "http://127.0.0.1:50052";
 						const pathEl = document.getElementById("setting-games-path");
 						if (pathEl) pathEl.value = cfg.games_path || "";
 						const animEl = document.getElementById("anim-toggle");
@@ -69,6 +71,7 @@ export function setupEventListeners() {
 	document.getElementById("settings-backdrop")?.addEventListener("click", () => closeModal("settings-modal"));
 	document.getElementById("btn-save-settings")?.addEventListener("click", async () => {
 		const server_url = document.getElementById("setting-server-url")?.value || "http://[::1]:50050";
+		const leaderboard_url = document.getElementById("setting-leaderboard-url")?.value || "http://127.0.0.1:50052";
 		const games_path = document.getElementById("setting-games-path")?.value || "";
 		const animations_enabled = document.getElementById("anim-toggle")?.checked ?? true;
 
@@ -81,7 +84,7 @@ export function setupEventListeners() {
 		if (window.__TAURI__) {
 			try {
 				await invoke("save_client_config", {
-					config: { server_url, games_path, animations_enabled }
+					config: { server_url, leaderboard_url, games_path, animations_enabled }
 				});
 				setLogText("設定を保存し適用しました");
 				await loadGames();

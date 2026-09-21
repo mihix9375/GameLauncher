@@ -3,6 +3,7 @@ import { setSelectedGame } from "../core/state.js";
 import { openModal } from "../ui/modal.js";
 import { setLogText } from "../ui/log.js";
 import { loadComments } from "../comments/comments.js";
+import { loadLeaderboards } from "../leaderboards/leaderboards.js";
 
 export async function openDetailModal(game, meta) {
 	setSelectedGame(game);
@@ -36,6 +37,7 @@ export async function openDetailModal(game, meta) {
 	});
 
   openModal("detail-modal");
+  loadLeaderboards(game);
   loadComments(game);
   setLogText(`${game.title} の詳細を開きました`);
 

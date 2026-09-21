@@ -5,3 +5,4 @@ pub mod download_game;
 pub mod sync_updates;
 pub mod settings;
 pub mod comments;
+pub mod leaderboards;

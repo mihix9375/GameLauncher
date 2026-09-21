@@ -22,6 +22,7 @@ async fn main()
 	.setup(|app| {
 		commands::launch::prepare_overlay(app.handle())
 			.map_err(std::io::Error::other)?;
+		tauri::async_runtime::spawn(commands::leaderboards::serve_local_api());
 		Ok(())
 	})
 	.on_window_event(|window, event| {
@@ -44,7 +45,8 @@ async fn main()
 		commands::settings::get_client_config,
 		commands::settings::save_client_config,
 		commands::comments::list_comments,
-		commands::comments::add_comment
+		commands::comments::add_comment,
+		commands::leaderboards::get_leaderboards
 	])
 	.run(tauri::generate_context!())
 	.expect("error while running tauri application");

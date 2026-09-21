@@ -123,6 +123,14 @@
             </div>
           </div>
 
+          <section id="leaderboard-section" class="leaderboard-section glass-inset" aria-labelledby="leaderboard-heading" hidden>
+            <div class="leaderboard-heading-row">
+              <h4 id="leaderboard-heading" class="box-title">🏆 ランキング</h4>
+              <span>TOP 10</span>
+            </div>
+            <div id="leaderboard-list" class="leaderboard-list"></div>
+          </section>
+
           <section class="comment-section glass-inset" aria-labelledby="comment-heading">
             <div class="comment-heading-row">
               <h4 id="comment-heading" class="box-title">💬 コメント</h4>
@@ -156,6 +164,10 @@
           <div class="setting-item">
             <label>接続先サーバー (gRPC / HTTP)</label>
             <input type="text" id="setting-server-url" value="http://[::1]:50050" class="setting-input" />
+          </div>
+          <div class="setting-item">
+            <label>ランキングServer API</label>
+            <input type="text" id="setting-leaderboard-url" value="http://127.0.0.1:50052" class="setting-input" />
           </div>
           <div class="setting-item">
             <label>ゲーム保存先ディレクトリ</label>

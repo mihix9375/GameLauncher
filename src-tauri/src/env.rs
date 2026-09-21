@@ -9,6 +9,8 @@ use serde_json::{Map, Value};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientConfig {
 	pub server_url: String,
+	#[serde(default = "default_leaderboard_url")]
+	pub leaderboard_url: String,
 	pub games_path: String,
 	pub animations_enabled: bool,
 }
@@ -17,6 +19,7 @@ impl Default for ClientConfig {
 	fn default() -> Self {
 		Self {
 			server_url: "http://[::1]:50050".to_string(),
+			leaderboard_url: default_leaderboard_url(),
 			games_path: "".to_string(),
 			animations_enabled: true,
 		}
@@ -24,9 +27,17 @@ impl Default for ClientConfig {
 }
 
 pub fn normalize_server_url(url: &str) -> String {
+	normalize_http_url(url, 50050)
+}
+
+pub fn normalize_leaderboard_url(url: &str) -> String {
+	normalize_http_url(url, 50052)
+}
+
+fn normalize_http_url(url: &str, default_port: u16) -> String {
 	let u = url.trim();
 	if u.is_empty() {
-		return "http://[::1]:50050".to_string();
+		return format!("http://127.0.0.1:{default_port}");
 	}
 	let scheme_removed = if let Some(s) = u.strip_prefix("http://") {
 		s
@@ -52,7 +63,7 @@ pub fn normalize_server_url(url: &str) -> String {
 	};
 
 	if !has_port {
-		result.push_str(":50050");
+		result.push_str(&format!(":{default_port}"));
 	}
 	result
 }
@@ -67,6 +78,7 @@ pub fn get_config() -> ClientConfig
 			if let Ok(mut cfg) = serde_json::from_str::<ClientConfig>(&content)
 			{
 				cfg.server_url = normalize_server_url(&cfg.server_url);
+				cfg.leaderboard_url = normalize_leaderboard_url(&cfg.leaderboard_url);
 				return cfg;
 			}
 		}
@@ -79,6 +91,7 @@ pub fn save_config(mut cfg: ClientConfig) -> Result<(), String>
 	let base = get_base_path()?;
 	let config_file = base.join("config.json");
 	cfg.server_url = normalize_server_url(&cfg.server_url);
+	cfg.leaderboard_url = normalize_leaderboard_url(&cfg.leaderboard_url);
 	let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
 	fs::write(&config_file, json).map_err(|e| e.to_string())?;
 	Ok(())
@@ -112,6 +125,8 @@ pub fn get_games_path() -> Result<PathBuf, String>
 
 	Ok(data_path)
 }
+
+fn default_leaderboard_url() -> String { "http://127.0.0.1:50052".to_string() }
 
 pub fn normalize_game_id(game_id: &str) -> Result<String, String>
 {

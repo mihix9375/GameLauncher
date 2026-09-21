@@ -1,10 +1,17 @@
 use std::time::Duration;
 
-use axum::extract::{Path as AxumPath, State};
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
+
+const LOCAL_API_BIND: &str = "127.0.0.1:50053";
+const LIST_ROUTE: &str = "/v1/games/{game_id}/leaderboards";
+const SUBMIT_ROUTE: &str = "/v1/games/{game_id}/leaderboards/{board_id}/scores";
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_BOARD_ID_LENGTH: usize = 32;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RankedEntry
@@ -25,17 +32,24 @@ pub struct Leaderboard
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct LeaderboardResponse
+struct LeaderboardListResponse
 {
 	game_id: String,
 	leaderboards: Vec<Leaderboard>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct SubmitScore
+struct ScoreSubmission
 {
 	player_name: String,
 	score: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ScoreSubmissionResponse
+{
+	ok: bool,
+	rank: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,56 +59,106 @@ struct ProxyError
 	message: String,
 }
 
-fn endpoint(game_id: &str, board_id: Option<&str>) -> Result<reqwest::Url, String>
+#[derive(Debug, Deserialize)]
+struct ServerError
+{
+	message: String,
+}
+
+fn server_client() -> Result<Client, String>
+{
+	Client::builder()
+		.timeout(REQUEST_TIMEOUT)
+		.build()
+		.map_err(|error| format!("ランキング用HTTPクライアントを作成できません: {error}"))
+}
+
+fn server_endpoint(game_id: &str, board_id: Option<&str>) -> Result<Url, String>
 {
 	let config = crate::env::get_config();
-	let mut url = reqwest::Url::parse(&crate::env::normalize_leaderboard_url(&config.leaderboard_url))
+	let base_url = crate::env::normalize_leaderboard_url(&config.leaderboard_url);
+	let mut url = Url::parse(&base_url)
 		.map_err(|error| format!("ランキングAPIのURLが不正です: {error}"))?;
+	let mut path = url.path_segments_mut()
+		.map_err(|_| "ランキングAPIのURLが不正です".to_string())?;
+
+	path.pop_if_empty()
+		.extend(["v1", "games", game_id, "leaderboards"]);
+	if let Some(board_id) = board_id
 	{
-		let mut segments = url.path_segments_mut().map_err(|_| "ランキングAPIのURLが不正です".to_string())?;
-		segments.pop_if_empty().extend(["v1", "games", game_id, "leaderboards"]);
-		if let Some(board_id) = board_id { segments.extend([board_id, "scores"]); }
+		path.extend([board_id, "scores"]);
 	}
+	drop(path);
 	Ok(url)
 }
 
-fn client() -> Result<reqwest::Client, String>
+fn validate_board_id(board_id: &str) -> Result<(), String>
 {
-	reqwest::Client::builder().timeout(Duration::from_secs(5)).build().map_err(|error| error.to_string())
+	let has_valid_characters = board_id.bytes()
+		.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-');
+	let is_valid = !board_id.is_empty()
+		&& board_id.len() <= MAX_BOARD_ID_LENGTH
+		&& has_valid_characters;
+	if is_valid { Ok(()) } else { Err("ランキングIDが不正です".to_string()) }
 }
 
-async fn fetch(game_id: &str) -> Result<LeaderboardResponse, String>
+async fn fetch_from_server(game_id: &str) -> Result<LeaderboardListResponse, String>
 {
 	let game_id = crate::env::normalize_game_id(game_id)?;
-	let response = client()?.get(endpoint(&game_id, None)?).send().await
+	let response = server_client()?
+		.get(server_endpoint(&game_id, None)?)
+		.send()
+		.await
 		.map_err(|error| format!("ランキングServerに接続できません: {error}"))?;
-	if !response.status().is_success() { return Err(format!("ランキングを取得できません (HTTP {})", response.status())); }
-	let mut result: LeaderboardResponse = response.json().await
+
+	if !response.status().is_success()
+	{
+		return Err(format!("ランキングを取得できません (HTTP {})", response.status()));
+	}
+
+	let mut result: LeaderboardListResponse = response.json().await
 		.map_err(|error| format!("ランキングの応答が不正です: {error}"))?;
 	result.leaderboards.truncate(2);
-	for board in &mut result.leaderboards { board.entries.truncate(10); }
+	for board in &mut result.leaderboards
+	{
+		board.entries.truncate(10);
+	}
 	Ok(result)
 }
 
-async fn submit(game_id: &str, board_id: &str, score: SubmitScore) -> Result<serde_json::Value, String>
+async fn submit_to_server(
+	game_id: &str,
+	board_id: &str,
+	submission: ScoreSubmission,
+) -> Result<ScoreSubmissionResponse, String>
 {
 	let game_id = crate::env::normalize_game_id(game_id)?;
-	if board_id.is_empty() || board_id.len() > 32 || !board_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-	{
-		return Err("ランキングIDが不正です".to_string());
-	}
-	let response = client()?.post(endpoint(&game_id, Some(board_id))?).json(&score).send().await
+	validate_board_id(board_id)?;
+
+	let response = server_client()?
+		.post(server_endpoint(&game_id, Some(board_id))?)
+		.json(&submission)
+		.send()
+		.await
 		.map_err(|error| format!("ランキングServerに接続できません: {error}"))?;
 	let status = response.status();
-	let body: serde_json::Value = response.json().await.map_err(|error| format!("ランキングの応答が不正です: {error}"))?;
-	if !status.is_success() { return Err(body.get("message").and_then(|value| value.as_str()).unwrap_or("スコアを登録できません").to_string()); }
-	Ok(body)
+
+	if !status.is_success()
+	{
+		let message = response.json::<ServerError>().await
+			.map(|error| error.message)
+			.unwrap_or_else(|_| format!("スコアを登録できません (HTTP {status})"));
+		return Err(message);
+	}
+
+	response.json().await
+		.map_err(|error| format!("ランキングの応答が不正です: {error}"))
 }
 
 #[tauri::command]
 pub async fn get_leaderboards(game_id: String) -> Result<Vec<Leaderboard>, String>
 {
-	Ok(fetch(&game_id).await?.leaderboards)
+	Ok(fetch_from_server(&game_id).await?.leaderboards)
 }
 
 type ProxyResult<T> = Result<Json<T>, (StatusCode, Json<ProxyError>)>;
@@ -104,32 +168,39 @@ fn proxy_error(message: String) -> (StatusCode, Json<ProxyError>)
 	(StatusCode::BAD_GATEWAY, Json(ProxyError { ok: false, message }))
 }
 
-async fn proxy_get(AxumPath(game_id): AxumPath<String>) -> ProxyResult<LeaderboardResponse>
+async fn proxy_list(Path(game_id): Path<String>) -> ProxyResult<LeaderboardListResponse>
 {
-	Ok(Json(fetch(&game_id).await.map_err(proxy_error)?))
+	Ok(Json(fetch_from_server(&game_id).await.map_err(proxy_error)?))
 }
 
 async fn proxy_submit(
-	State(()): State<()>,
-	AxumPath((game_id, board_id)): AxumPath<(String, String)>,
-	Json(score): Json<SubmitScore>,
-) -> ProxyResult<serde_json::Value>
+	Path((game_id, board_id)): Path<(String, String)>,
+	Json(submission): Json<ScoreSubmission>,
+) -> ProxyResult<ScoreSubmissionResponse>
 {
-	Ok(Json(submit(&game_id, &board_id, score).await.map_err(proxy_error)?))
+	let result = submit_to_server(&game_id, &board_id, submission)
+		.await
+		.map_err(proxy_error)?;
+	Ok(Json(result))
 }
 
 pub async fn serve_local_api()
 {
 	let app = Router::new()
-		.route("/v1/games/{game_id}/leaderboards", get(proxy_get))
-		.route("/v1/games/{game_id}/leaderboards/{board_id}/scores", post(proxy_submit))
-		.with_state(());
-	match tokio::net::TcpListener::bind("127.0.0.1:50053").await
+		.route(LIST_ROUTE, get(proxy_list))
+		.route(SUBMIT_ROUTE, post(proxy_submit));
+	let listener = match tokio::net::TcpListener::bind(LOCAL_API_BIND).await
 	{
-		Ok(listener) => {
-			println!("Unity leaderboard API listening on http://127.0.0.1:50053");
-			if let Err(error) = axum::serve(listener, app).await { eprintln!("Unity leaderboard API error: {error}"); }
+		Ok(listener) => listener,
+		Err(error) => {
+			eprintln!("Unity leaderboard APIを起動できません: {error}");
+			return;
 		}
-		Err(error) => eprintln!("Unity leaderboard APIを起動できません: {error}"),
+	};
+
+	println!("Unity leaderboard API listening on http://{LOCAL_API_BIND}");
+	if let Err(error) = axum::serve(listener, app).await
+	{
+		eprintln!("Unity leaderboard API error: {error}");
 	}
 }

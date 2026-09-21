@@ -1,10 +1,14 @@
-use std::fs;
 use std::env;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
-use tonic::transport::{Endpoint, Channel};
+
 use gamelauncher::game_service_client::GameServiceClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tonic::transport::{Channel, Endpoint};
+
+const DEFAULT_SERVER_URL: &str = "http://[::1]:50050";
+const DEFAULT_LEADERBOARD_URL: &str = "http://127.0.0.1:50052";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientConfig {
@@ -18,7 +22,7 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
 	fn default() -> Self {
 		Self {
-			server_url: "http://[::1]:50050".to_string(),
+			server_url: DEFAULT_SERVER_URL.to_string(),
 			leaderboard_url: default_leaderboard_url(),
 			games_path: "".to_string(),
 			animations_enabled: true,
@@ -26,18 +30,22 @@ impl Default for ClientConfig {
 	}
 }
 
+fn default_leaderboard_url() -> String {
+	DEFAULT_LEADERBOARD_URL.to_string()
+}
+
 pub fn normalize_server_url(url: &str) -> String {
-	normalize_http_url(url, 50050)
+	normalize_http_url(url, DEFAULT_SERVER_URL, 50050)
 }
 
 pub fn normalize_leaderboard_url(url: &str) -> String {
-	normalize_http_url(url, 50052)
+	normalize_http_url(url, DEFAULT_LEADERBOARD_URL, 50052)
 }
 
-fn normalize_http_url(url: &str, default_port: u16) -> String {
+fn normalize_http_url(url: &str, default_url: &str, default_port: u16) -> String {
 	let u = url.trim();
 	if u.is_empty() {
-		return format!("http://127.0.0.1:{default_port}");
+		return default_url.to_string();
 	}
 	let scheme_removed = if let Some(s) = u.strip_prefix("http://") {
 		s
@@ -125,8 +133,6 @@ pub fn get_games_path() -> Result<PathBuf, String>
 
 	Ok(data_path)
 }
-
-fn default_leaderboard_url() -> String { "http://127.0.0.1:50052".to_string() }
 
 pub fn normalize_game_id(game_id: &str) -> Result<String, String>
 {

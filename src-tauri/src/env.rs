@@ -1,6 +1,6 @@
 use std::fs;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use tonic::transport::{Endpoint, Channel};
 use gamelauncher::game_service_client::GameServiceClient;
 use serde::{Deserialize, Serialize};
@@ -57,11 +57,15 @@ pub fn normalize_server_url(url: &str) -> String {
 	result
 }
 
-pub fn get_config() -> ClientConfig {
-	if let Ok(base) = get_base_path() {
+pub fn get_config() -> ClientConfig
+{
+	if let Ok(base) = get_base_path()
+	{
 		let config_file = base.join("config.json");
-		if let Ok(content) = fs::read_to_string(&config_file) {
-			if let Ok(mut cfg) = serde_json::from_str::<ClientConfig>(&content) {
+		if let Ok(content) = fs::read_to_string(&config_file)
+		{
+			if let Ok(mut cfg) = serde_json::from_str::<ClientConfig>(&content)
+			{
 				cfg.server_url = normalize_server_url(&cfg.server_url);
 				return cfg;
 			}
@@ -70,7 +74,8 @@ pub fn get_config() -> ClientConfig {
 	ClientConfig::default()
 }
 
-pub fn save_config(mut cfg: ClientConfig) -> Result<(), String> {
+pub fn save_config(mut cfg: ClientConfig) -> Result<(), String>
+{
 	let base = get_base_path()?;
 	let config_file = base.join("config.json");
 	cfg.server_url = normalize_server_url(&cfg.server_url);
@@ -92,9 +97,12 @@ pub fn get_base_path() -> Result<PathBuf, String>
 pub fn get_games_path() -> Result<PathBuf, String>
 {
 	let cfg = get_config();
-	let data_path = if !cfg.games_path.trim().is_empty() {
+	let data_path = if !cfg.games_path.trim().is_empty()
+	{
 		PathBuf::from(cfg.games_path.trim())
-	} else {
+	}
+	else
+	{
 		let mut base = get_base_path()?;
 		base.push("games");
 		base
@@ -105,14 +113,57 @@ pub fn get_games_path() -> Result<PathBuf, String>
 	Ok(data_path)
 }
 
+pub fn normalize_game_id(game_id: &str) -> Result<String, String>
+{
+	let value = game_id.trim();
+	let value = if value.to_ascii_lowercase().ends_with(".exe")
+	{
+		&value[..value.len() - 4]
+	}
+	else
+	{
+		value
+	};
+
+	if value.is_empty()
+		|| value == "."
+		|| value == ".."
+		|| value.contains(['/', '\\', ':'])
+		|| !matches!(Path::new(value).components().collect::<Vec<_>>().as_slice(), [Component::Normal(_)])
+	{
+		return Err("不正なゲームIDです".to_string());
+	}
+
+	Ok(value.to_string())
+}
+
+pub fn safe_game_relative_path(base: &Path, relative: &str) -> Result<PathBuf, String>
+{
+	let path = Path::new(relative);
+	if relative.trim().is_empty()
+		|| relative.contains(':')
+		|| path.components().any(|component| !matches!(component, Component::Normal(_)))
+	{
+		return Err("不正な実行ファイルパスです".to_string());
+	}
+
+	Ok(base.join(path))
+}
+
 pub fn connect_and_get_client(url: String) -> GameServiceClient<Channel> 
 {
 	let url = normalize_server_url(&url);
-	let endpoint = match Endpoint::from_shared(url) {
+	let endpoint = match Endpoint::from_shared(url)
+	{
 		Ok(ep) => ep,
 		Err(_) => Endpoint::from_static("http://[::1]:50050"),
 	};
-	let channel = endpoint.connect_lazy();
+	let configured_endpoint = endpoint
+		.initial_stream_window_size(Some(1024 * 1024 * 16))
+		.initial_connection_window_size(Some(1024 * 1024 * 32))
+		.http2_adaptive_window(true)
+		.tcp_nodelay(true);
+	let channel = configured_endpoint.connect_lazy();
 
 	GameServiceClient::new(channel)
 }
@@ -155,4 +206,34 @@ pub struct Meta
 	#[serde(flatten, skip_serializing)]
 	#[allow(dead_code)]
 	pub extra: Map<String, Value>,
+}
+
+#[cfg(test)]
+mod tests
+{
+	use super::*;
+
+	#[test]
+	fn game_id_accepts_a_single_file_name()
+	{
+		assert_eq!(normalize_game_id("テスト Game.exe").unwrap(), "テスト Game");
+	}
+
+	#[test]
+	fn game_id_rejects_paths()
+	{
+		for value in ["../game", "folder/game", "folder\\game", "C:\\game", ""]
+		{
+			assert!(normalize_game_id(value).is_err(), "{value}");
+		}
+	}
+
+	#[test]
+	fn executable_path_must_stay_relative()
+	{
+		let base = Path::new("games").join("sample");
+		assert!(safe_game_relative_path(&base, "bin/game.exe").is_ok());
+		assert!(safe_game_relative_path(&base, "../game.exe").is_err());
+		assert!(safe_game_relative_path(&base, "C:\\game.exe").is_err());
+	}
 }

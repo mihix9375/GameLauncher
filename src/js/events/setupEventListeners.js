@@ -6,6 +6,7 @@ import { setLogText } from "../ui/log.js";
 import { getSelectedGame, setGameUpdateFlag, getAllGames } from "../core/state.js";
 import { launchGame } from "../games/launchGame.js";
 import { renderGames } from "../games/renderGames.js";
+import { submitComment } from "../comments/comments.js";
 
 export function setupEventListeners() {
 	const searchInput = document.getElementById("search-input");
@@ -26,16 +27,16 @@ export function setupEventListeners() {
 	const btnRefresh = document.getElementById("btn-refresh");
 	if (btnRefresh) {
 		btnRefresh.addEventListener("click", async () => {
-			setLogText("同期・更新中...");
+			setLogText("ローカル情報およびサーバーと同期中...");
 			await loadGames();
 			if (window.__TAURI__) {
 				try {
 					await invoke("sync_updates");
 				} catch (e) {
 					console.warn("sync_updates error:", e);
+					setLogText("サーバーへの接続に失敗しました");
 				}
 			}
-			setLogText("更新完了");
 		});
 	}
 
@@ -104,28 +105,71 @@ export function setupEventListeners() {
 		});
 	}
 
+	const commentContent = document.getElementById("comment-content");
+	const commentLength = document.getElementById("comment-length");
+	commentContent?.addEventListener("input", () => {
+		if (commentLength) commentLength.textContent = `${commentContent.value.length} / 1000`;
+	});
+	commentContent?.addEventListener("keydown", (event) => {
+		if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+			event.preventDefault();
+			submitComment();
+		}
+	});
+	document.getElementById("btn-submit-comment")?.addEventListener("click", submitComment);
+
 	if (window.__TAURI__ && window.__TAURI__.event) {
-		window.__TAURI__.event.listen("update_notice", async (event) => {
+		const downloadQueue = [];
+		let isDownloading = false;
+		const pendingGameIds = new Set();
+
+		async function processDownloadQueue() {
+			if (isDownloading) return;
+			isDownloading = true;
+			while (downloadQueue.length > 0) {
+				const item = downloadQueue.shift();
+				const remaining = downloadQueue.length;
+				setLogText(`[同期・ダウンロード中] ${item.game_id} (v${item.version}) を取得中... (残り${remaining}件)`);
+				try {
+					await invoke("download_game", { gameId: item.game_id, version: item.version });
+					setLogText(`[完了] ${item.game_id} のダウンロード完了`);
+					await loadGames();
+				} catch (e) {
+					console.error("Auto download error:", e);
+					setLogText(`[エラー] ${item.game_id} のダウンロード失敗: ${e}`);
+				} finally {
+					pendingGameIds.delete(item.cleanId);
+				}
+			}
+			isDownloading = false;
+			setLogText("ゲーム情報の同期・更新がすべて完了しました");
+		}
+
+		const updateListener = window.__TAURI__.event.listen("update_notice", async (event) => {
 			const payload = event.payload;
 			if (payload && payload.game_id) {
 				const cleanId = payload.game_id.replace(".exe", "");
 				const existing = getAllGames().find(g => g.id === payload.game_id || g.game === payload.game_id || g.id === cleanId);
 				if (!existing || !existing.isInstalled || existing.version !== payload.version || existing.hasUpdate) {
-					setLogText(`[更新通知] ${cleanId} (v${payload.version}) を検出。自動ダウンロード開始...`);
-					setGameUpdateFlag(cleanId, payload.version);
-					renderGames(getAllGames());
-					try {
-						await invoke("download_game", { gameId: payload.game_id, version: payload.version });
-						setLogText(`[完了] ${payload.game_id} の自動ダウンロード完了。自動リフレッシュ中...`);
-						await loadGames();
-					} catch (e) {
-						console.error("Auto download error:", e);
-						setLogText(`[エラー] ${payload.game_id} の自動ダウンロード失敗: ${e}`);
+					if (!pendingGameIds.has(cleanId)) {
+						pendingGameIds.add(cleanId);
+						setGameUpdateFlag(cleanId, payload.version);
+						renderGames(getAllGames());
+						downloadQueue.push({ game_id: payload.game_id, version: payload.version, cleanId });
+						processDownloadQueue();
 					}
 				} else {
 					setLogText(`[確認] ${payload.game_id} は既に最新バージョン (v${payload.version}) です`);
 				}
 			}
 		});
+
+		// リスナーの登録後に常駐ストリームを開始し、起動直後の通知欠落を防ぐ。
+		updateListener
+			.then(() => invoke("sync_updates"))
+			.catch((e) => {
+				console.warn("initial sync_updates error:", e);
+				setLogText("サーバーへの接続に失敗しました");
+			});
 	}
 }

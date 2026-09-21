@@ -4,29 +4,47 @@ mod env;
 mod commands;
 mod wait_update;
 
+use tauri::Manager;
+
 #[tokio::main]
 async fn main()
 {
-	let url = env::get_config().server_url;
-	let client = env::connect_and_get_client(url);
-
 	tauri::Builder::default()
-	.manage(client.clone())
-	.setup(move |app| {
-		let handle = app.handle().clone();
-		tauri::async_runtime::spawn(async move {
-			wait_update::restart_wait_update(handle).await;
-		});
+	.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+		if let Some(window) = app.get_webview_window("main")
+		{
+			let _ = window.show();
+			let _ = window.unminimize();
+			let _ = window.set_focus();
+		}
+	}))
+	.manage(commands::launch::GameProcessState::default())
+	.setup(|app| {
+		commands::launch::prepare_overlay(app.handle())
+			.map_err(std::io::Error::other)?;
 		Ok(())
+	})
+	.on_window_event(|window, event| {
+		if window.label() == "main"
+		{
+			if let tauri::WindowEvent::CloseRequested { api, .. } = event
+			{
+				api.prevent_close();
+				commands::launch::begin_shutdown(window.app_handle().clone());
+			}
+		}
 	})
 	.invoke_handler(tauri::generate_handler![
 		commands::launch::launch,
+		commands::launch::close_game,
 		commands::refresh::refresh,
 		commands::check_version::check_version,
 		commands::download_game::download_game,
 		commands::sync_updates::sync_updates,
 		commands::settings::get_client_config,
-		commands::settings::save_client_config
+		commands::settings::save_client_config,
+		commands::comments::list_comments,
+		commands::comments::add_comment
 	])
 	.run(tauri::generate_context!())
 	.expect("error while running tauri application");

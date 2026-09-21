@@ -723,6 +723,141 @@ body {
   color: var(--text-secondary);
 }
 
+/* Game Comments */
+.comment-section {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 18px 20px;
+}
+
+.comment-heading-row,
+.comment-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.comment-heading-row .box-title {
+  margin-bottom: 0;
+}
+
+.comment-count,
+.comment-length {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 132px;
+  margin-top: 12px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.comment-item {
+  padding: 10px 13px;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: #FFFFFF;
+}
+
+.comment-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+}
+
+.comment-author {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.comment-date {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.comment-content {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.comment-message {
+  padding: 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.comment-message.error {
+  color: var(--accent-red);
+}
+
+.comment-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.comment-input {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  outline: none;
+  background: #FFFFFF;
+  color: var(--text-primary);
+  font: 500 13px/1.5 var(--font-main);
+  resize: vertical;
+  user-select: text;
+}
+
+.comment-input:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.comment-textarea {
+  min-height: 62px;
+  max-height: 120px;
+}
+
+.btn-comment-submit {
+  padding: 10px 22px;
+  border: none;
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-indigo));
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+  color: #FFFFFF;
+  cursor: pointer;
+  font-family: var(--font-main);
+  font-weight: 800;
+}
+
+.btn-comment-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.32);
+}
+
+.btn-comment-submit:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 /* Launch Card & Play Button (Matching pepi PlayButton & Play.png) */
 .launch-card {
   display: flex;

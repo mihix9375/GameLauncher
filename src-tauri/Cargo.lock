@@ -1567,6 +1567,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "windows",
  "zip 8.6.0",
 ]
 

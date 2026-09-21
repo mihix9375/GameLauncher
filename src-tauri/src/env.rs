@@ -1,6 +1,6 @@
 use std::fs;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use tonic::transport::{Endpoint, Channel};
 use gamelauncher::game_service_client::GameServiceClient;
 use serde::{Deserialize, Serialize};
@@ -113,6 +113,43 @@ pub fn get_games_path() -> Result<PathBuf, String>
 	Ok(data_path)
 }
 
+pub fn normalize_game_id(game_id: &str) -> Result<String, String>
+{
+	let value = game_id.trim();
+	let value = if value.to_ascii_lowercase().ends_with(".exe")
+	{
+		&value[..value.len() - 4]
+	}
+	else
+	{
+		value
+	};
+
+	if value.is_empty()
+		|| value == "."
+		|| value == ".."
+		|| value.contains(['/', '\\', ':'])
+		|| !matches!(Path::new(value).components().collect::<Vec<_>>().as_slice(), [Component::Normal(_)])
+	{
+		return Err("不正なゲームIDです".to_string());
+	}
+
+	Ok(value.to_string())
+}
+
+pub fn safe_game_relative_path(base: &Path, relative: &str) -> Result<PathBuf, String>
+{
+	let path = Path::new(relative);
+	if relative.trim().is_empty()
+		|| relative.contains(':')
+		|| path.components().any(|component| !matches!(component, Component::Normal(_)))
+	{
+		return Err("不正な実行ファイルパスです".to_string());
+	}
+
+	Ok(base.join(path))
+}
+
 pub fn connect_and_get_client(url: String) -> GameServiceClient<Channel> 
 {
 	let url = normalize_server_url(&url);
@@ -169,4 +206,34 @@ pub struct Meta
 	#[serde(flatten, skip_serializing)]
 	#[allow(dead_code)]
 	pub extra: Map<String, Value>,
+}
+
+#[cfg(test)]
+mod tests
+{
+	use super::*;
+
+	#[test]
+	fn game_id_accepts_a_single_file_name()
+	{
+		assert_eq!(normalize_game_id("テスト Game.exe").unwrap(), "テスト Game");
+	}
+
+	#[test]
+	fn game_id_rejects_paths()
+	{
+		for value in ["../game", "folder/game", "folder\\game", "C:\\game", ""]
+		{
+			assert!(normalize_game_id(value).is_err(), "{value}");
+		}
+	}
+
+	#[test]
+	fn executable_path_must_stay_relative()
+	{
+		let base = Path::new("games").join("sample");
+		assert!(safe_game_relative_path(&base, "bin/game.exe").is_ok());
+		assert!(safe_game_relative_path(&base, "../game.exe").is_err());
+		assert!(safe_game_relative_path(&base, "C:\\game.exe").is_err());
+	}
 }

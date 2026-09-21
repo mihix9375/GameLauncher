@@ -122,6 +122,24 @@
               <p class="launch-note">クリックでゲームアプリケーションを開始します</p>
             </div>
           </div>
+
+          <section class="comment-section glass-inset" aria-labelledby="comment-heading">
+            <div class="comment-heading-row">
+              <h4 id="comment-heading" class="box-title">💬 コメント</h4>
+              <span id="comment-count" class="comment-count">0件</span>
+            </div>
+            <div id="comment-list" class="comment-list" aria-live="polite">
+              <p class="comment-message">コメントを読み込んでいます...</p>
+            </div>
+            <div class="comment-form">
+              <input id="comment-author" class="comment-input" type="text" maxlength="40" placeholder="名前（任意・未入力は匿名）" />
+              <textarea id="comment-content" class="comment-input comment-textarea" maxlength="1000" rows="3" placeholder="このゲームへのコメントを入力"></textarea>
+              <div class="comment-submit-row">
+                <span id="comment-length" class="comment-length">0 / 1000</span>
+                <button id="btn-submit-comment" class="btn-comment-submit" type="button">投稿する</button>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>

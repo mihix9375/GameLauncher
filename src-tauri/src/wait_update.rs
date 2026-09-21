@@ -1,8 +1,5 @@
 use crate::env::gamelauncher::Identificial;
-use tonic::{
-	Request, transport::Channel
-};
-use crate::env::gamelauncher::game_service_client::GameServiceClient;
+use tonic::Request;
 use tauri::Emitter;
 
 pub fn get_current_ip() -> String {
@@ -19,13 +16,6 @@ pub fn get_current_ip() -> String {
 }
 
 static WAIT_UPDATE_HANDLE: std::sync::OnceLock<tokio::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>> = std::sync::OnceLock::new();
-
-#[allow(dead_code)]
-pub fn start_wait_update(app_handle: tauri::AppHandle, _client: GameServiceClient<Channel>) {
-	tauri::async_runtime::spawn(async move {
-		restart_wait_update(app_handle).await;
-	});
-}
 
 pub async fn restart_wait_update(app_handle: tauri::AppHandle)
 {
@@ -48,8 +38,11 @@ pub async fn restart_wait_update(app_handle: tauri::AppHandle)
 			if let Ok(response) = client.wait_update(request).await {
 				let mut stream = response.into_inner();
 				while let Ok(Some(notice)) = stream.message().await {
+					let Ok(game_id) = crate::env::normalize_game_id(&notice.game_id) else {
+						continue;
+					};
 					let _ = app_handle.emit("update_notice", serde_json::json!({
-						"game_id": notice.game_id,
+						"game_id": game_id,
 						"version": notice.version,
 					}));
 				}

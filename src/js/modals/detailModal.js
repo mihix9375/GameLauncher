@@ -2,6 +2,7 @@ import { invoke } from "../core/tauri.js";
 import { setSelectedGame } from "../core/state.js";
 import { openModal } from "../ui/modal.js";
 import { setLogText } from "../ui/log.js";
+import { loadComments } from "../comments/comments.js";
 
 export async function openDetailModal(game, meta) {
 	setSelectedGame(game);
@@ -34,8 +35,9 @@ export async function openDetailModal(game, meta) {
 		modalTags.appendChild(tag);
 	});
 
-	openModal("detail-modal");
-	setLogText(`${game.title} の詳細を開きました`);
+  openModal("detail-modal");
+  loadComments(game);
+  setLogText(`${game.title} の詳細を開きました`);
 
 	if (window.__TAURI__) {
 		try {

@@ -1,0 +1,66 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", "Noto Sans JP", sans-serif;
+  background: transparent;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+	pointer-events: none;
+}
+
+#close-game {
+	position: fixed;
+	top: 24px;
+	right: 24px;
+	display: grid;
+  width: 88px;
+  height: 88px;
+  padding: 0;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.58);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.92);
+	background: rgba(8, 12, 20, 0.64);
+	box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+	pointer-events: auto;
+  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+#close-game span {
+  font-size: 68px;
+  font-weight: 300;
+  line-height: 1;
+  transform: translateY(-4px);
+}
+
+#close-game:hover,
+#close-game.is-hovered {
+  border-color: rgba(255, 255, 255, 0.9);
+  background: rgba(205, 42, 56, 0.78);
+  transform: scale(1.06);
+}
+
+#close-game:active,
+#close-game.is-pressed {
+  transform: scale(0.96);
+}
+
+#close-game:focus-visible {
+  outline: 3px solid rgba(116, 198, 255, 0.95);
+  outline-offset: 2px;
+}
+
+#close-game:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}

@@ -25,9 +25,13 @@ async fn main()
 		Ok(())
 	})
 	.on_window_event(|window, event| {
-		if window.label() == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. })
+		if window.label() == "main"
 		{
-			commands::launch::shutdown_app(window.app_handle());
+			if let tauri::WindowEvent::CloseRequested { api, .. } = event
+			{
+				api.prevent_close();
+				commands::launch::begin_shutdown(window.app_handle().clone());
+			}
 		}
 	})
 	.invoke_handler(tauri::generate_handler![

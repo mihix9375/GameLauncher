@@ -1,5 +1,6 @@
 use crate::env;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State};
 #[cfg(not(target_os = "windows"))]
@@ -24,6 +25,7 @@ struct OverlayGeometry
 pub struct GameProcessState
 {
 	child: Arc<Mutex<Option<Child>>>,
+	shutting_down: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -121,15 +123,20 @@ pub fn close_game(
 	result
 }
 
-pub fn shutdown_app(app_handle: &AppHandle)
+pub fn begin_shutdown(app_handle: AppHandle)
 {
-	let process_state = app_handle.state::<GameProcessState>();
-	let _ = terminate_current_game(process_state.inner());
-	if let Some(overlay) = app_handle.get_webview_window("game-overlay")
+	let process_state = app_handle.state::<GameProcessState>().inner().clone();
+	if process_state.shutting_down.swap(true, Ordering::SeqCst)
 	{
-		let _ = overlay.destroy();
+		return;
 	}
-	app_handle.exit(0);
+
+	tauri::async_runtime::spawn(async move {
+		let state_for_termination = process_state.clone();
+		let _ = tokio::task::spawn_blocking(move || terminate_current_game(&state_for_termination)).await;
+		hide_overlay(&app_handle);
+		app_handle.exit(0);
+	});
 }
 
 fn show_overlay(app_handle: &AppHandle) -> Result<(), String>
@@ -217,6 +224,7 @@ fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, pro
 	tauri::async_runtime::spawn(async move {
 		loop {
 			tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+			if process_state.shutting_down.load(Ordering::SeqCst) { return; }
 			let finished = {
 				let Ok(mut guard) = process_state.child.lock() else { return; };
 				let Some(child) = guard.as_mut() else { return; };
@@ -258,6 +266,7 @@ fn monitor_overlay_input(app_handle: AppHandle, process_state: GameProcessState,
 		let Ok(geometry) = overlay_geometry(&app_handle) else { return; };
 		loop {
 			tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+			if process_state.shutting_down.load(Ordering::SeqCst) { return; }
 			let running = process_state
 				.child
 				.lock()

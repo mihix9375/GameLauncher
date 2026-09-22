@@ -1,4 +1,4 @@
-use crate::env::gamelauncher::Identificial;
+use crate::env::gamelauncher::{Identificial, UpdateAction};
 use tonic::Request;
 use tauri::Emitter;
 
@@ -32,7 +32,8 @@ pub async fn restart_wait_update(app_handle: tauri::AppHandle)
 			let current_ip = get_current_ip();
 
 			let request = Request::new(Identificial {
-				ip_addr: current_ip
+				ip_addr: current_ip,
+				installed_game_ids: installed_game_ids(),
 			});
 
 			if let Ok(response) = client.wait_update(request).await {
@@ -41,6 +42,21 @@ pub async fn restart_wait_update(app_handle: tauri::AppHandle)
 					let Ok(game_id) = crate::env::normalize_game_id(&notice.game_id) else {
 						continue;
 					};
+					if UpdateAction::try_from(notice.action).unwrap_or(UpdateAction::Upsert) == UpdateAction::Delete
+					{
+						let result = crate::commands::delete_game::apply_server_deletion(&app_handle, &game_id).await;
+						let (deleted, error) = match result
+						{
+							Ok(deleted) => (deleted, None),
+							Err(error) => (false, Some(error)),
+						};
+						let _ = app_handle.emit("game_delete_notice", serde_json::json!({
+							"game_id": game_id,
+							"deleted": deleted,
+							"error": error,
+						}));
+						continue;
+					}
 					let _ = app_handle.emit("update_notice", serde_json::json!({
 						"game_id": game_id,
 						"version": notice.version,
@@ -52,6 +68,19 @@ pub async fn restart_wait_update(app_handle: tauri::AppHandle)
 	});
 
 	*guard = Some(new_handle);
+}
+
+fn installed_game_ids() -> Vec<String>
+{
+	let Ok(games_path) = crate::env::get_games_path() else { return Vec::new(); };
+	let Ok(entries) = std::fs::read_dir(games_path) else { return Vec::new(); };
+	let mut game_ids = entries.flatten()
+		.filter(|entry| entry.path().is_dir() && entry.path().join("meta.json").is_file())
+		.filter_map(|entry| crate::env::normalize_game_id(&entry.file_name().to_string_lossy()).ok())
+		.collect::<Vec<_>>();
+	game_ids.sort();
+	game_ids.dedup();
+	game_ids
 }
 
 fn get_ip_list() -> Vec<String> {

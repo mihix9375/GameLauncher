@@ -125,12 +125,17 @@ export function setupEventListeners() {
 		const downloadQueue = [];
 		let isDownloading = false;
 		const pendingGameIds = new Set();
+		const removedGameIds = new Set();
 
 		async function processDownloadQueue() {
 			if (isDownloading) return;
 			isDownloading = true;
 			while (downloadQueue.length > 0) {
 				const item = downloadQueue.shift();
+				if (removedGameIds.has(item.cleanId)) {
+					pendingGameIds.delete(item.cleanId);
+					continue;
+				}
 				const remaining = downloadQueue.length;
 				setLogText(`[同期・ダウンロード中] ${item.game_id} (v${item.version}) を取得中... (残り${remaining}件)`);
 				try {
@@ -152,6 +157,7 @@ export function setupEventListeners() {
 			const payload = event.payload;
 			if (payload && payload.game_id) {
 				const cleanId = payload.game_id.replace(".exe", "");
+				removedGameIds.delete(cleanId);
 				const existing = getAllGames().find(g => g.id === payload.game_id || g.game === payload.game_id || g.id === cleanId);
 				if (!existing || !existing.isInstalled || existing.version !== payload.version || existing.hasUpdate) {
 					if (!pendingGameIds.has(cleanId)) {
@@ -166,9 +172,25 @@ export function setupEventListeners() {
 				}
 			}
 		});
+		const deleteListener = window.__TAURI__.event.listen("game_delete_notice", async (event) => {
+			const payload = event.payload;
+			if (!payload?.game_id) return;
+			const cleanId = payload.game_id.replace(".exe", "");
+			removedGameIds.add(cleanId);
+			pendingGameIds.delete(cleanId);
+			if (payload.error) {
+				console.error("Server deletion error:", payload.error);
+				setLogText(`[エラー] ${cleanId} を削除できませんでした: ${payload.error}`);
+				return;
+			}
+			await loadGames();
+			setLogText(payload.deleted
+				? `[削除] ${cleanId} はServerの配布終了により削除されました`
+				: `[確認] ${cleanId} はServerで配布されていません`);
+		});
 
 		// リスナーの登録後に常駐ストリームを開始し、起動直後の通知欠落を防ぐ。
-		updateListener
+		Promise.all([updateListener, deleteListener])
 			.then(() => invoke("sync_updates"))
 			.catch((e) => {
 				console.warn("initial sync_updates error:", e);

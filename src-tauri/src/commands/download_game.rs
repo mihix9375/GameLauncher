@@ -9,7 +9,7 @@ use tonic::Request;
 
 use super::game_archive::extract_archive;
 
-static DOWNLOAD_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+pub(crate) static GAME_STORAGE_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
 const MANIFEST_FILE: &str = ".gamelauncher-manifest.json";
 
 struct UpdatePaths
@@ -61,7 +61,7 @@ impl UpdatePaths
 #[tauri::command]
 pub async fn download_game(game_id: String, version: String) -> Result<(), String>
 {
-	let _download_guard = DOWNLOAD_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+	let _download_guard = GAME_STORAGE_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
 	let games_path = crate::env::get_games_path()?;
 	let clean_id = crate::env::normalize_game_id(&game_id)?;
 	let game_path = games_path.join(&clean_id);

@@ -10,6 +10,9 @@ use tonic::transport::{Channel, Endpoint};
 const DEFAULT_SERVER_URL: &str = "http://[::1]:50050";
 const DEFAULT_LEADERBOARD_URL: &str = "http://127.0.0.1:50052";
 
+static GRPC_CHANNEL: std::sync::OnceLock<tokio::sync::Mutex<Option<(String, Channel)>>> =
+	std::sync::OnceLock::new();
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientConfig {
 	pub server_url: String,
@@ -171,10 +174,20 @@ pub fn safe_game_relative_path(base: &Path, relative: &str) -> Result<PathBuf, S
 	Ok(base.join(path))
 }
 
-pub fn connect_and_get_client(url: String) -> GameServiceClient<Channel> 
+pub async fn connect_and_get_client(url: String) -> GameServiceClient<Channel>
 {
 	let url = normalize_server_url(&url);
-	let endpoint = match Endpoint::from_shared(url)
+	let cache = GRPC_CHANNEL.get_or_init(|| tokio::sync::Mutex::new(None));
+	let mut cached = cache.lock().await;
+	if let Some((cached_url, channel)) = cached.as_ref()
+	{
+		if cached_url == &url
+		{
+			return GameServiceClient::new(channel.clone());
+		}
+	}
+
+	let endpoint = match Endpoint::from_shared(url.clone())
 	{
 		Ok(ep) => ep,
 		Err(_) => Endpoint::from_static("http://[::1]:50050"),
@@ -185,7 +198,7 @@ pub fn connect_and_get_client(url: String) -> GameServiceClient<Channel>
 		.http2_adaptive_window(true)
 		.tcp_nodelay(true);
 	let channel = configured_endpoint.connect_lazy();
-
+	*cached = Some((url, channel.clone()));
 	GameServiceClient::new(channel)
 }
 

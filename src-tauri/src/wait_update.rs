@@ -28,7 +28,7 @@ pub async fn restart_wait_update(app_handle: tauri::AppHandle)
 	let new_handle = tauri::async_runtime::spawn(async move {
 		loop {
 			let url = crate::env::get_config().server_url;
-			let mut client = crate::env::connect_and_get_client(url);
+			let mut client = crate::env::connect_and_get_client(url).await;
 			let current_ip = get_current_ip();
 
 			let request = Request::new(Identificial {

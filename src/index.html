@@ -113,42 +113,40 @@
             </section>
           </aside>
 
-          <main class="detail-main">
-            <div class="modal-header-banner" id="modal-banner">
-              <img id="modal-banner-backdrop" class="modal-banner-backdrop" alt="" aria-hidden="true" hidden />
-              <img id="modal-banner-image" class="modal-banner-image" alt="" hidden />
-              <div class="banner-gradient"></div>
-              <div class="banner-content">
-                <div class="modal-tags" id="modal-tags"></div>
-                <h2 id="modal-title" class="modal-title">ゲームタイトル</h2>
-                <div class="modal-meta-badges">
-                  <span id="modal-version" class="meta-badge version-badge">v1.0.0</span>
-                  <span id="modal-author" class="meta-badge author-badge">ゲーム開発研究部</span>
-                  <span id="modal-date" class="meta-badge date-badge">2026/07/07</span>
+          <div class="modal-header-banner" id="modal-banner">
+            <img id="modal-banner-backdrop" class="modal-banner-backdrop" alt="" aria-hidden="true" hidden />
+            <img id="modal-banner-image" class="modal-banner-image" alt="" hidden />
+            <div class="banner-gradient"></div>
+            <div class="banner-content">
+              <div class="modal-tags" id="modal-tags"></div>
+              <h2 id="modal-title" class="modal-title">ゲームタイトル</h2>
+              <div class="modal-meta-badges">
+                <span id="modal-version" class="meta-badge version-badge">v1.0.0</span>
+                <span id="modal-author" class="meta-badge author-badge">ゲーム開発研究部</span>
+                <span id="modal-date" class="meta-badge date-badge">2026/07/07</span>
+              </div>
+              <div class="hero-actions">
+                <div class="hero-play-action">
+                  <button id="btn-launch-game" class="btn-launch primary-glow">
+                    <span class="btn-icon">▶</span>
+                    <span class="btn-text">起動する (Play)</span>
+                  </button>
+                  <span class="launch-status ready">起動可能</span>
                 </div>
-                <div class="hero-actions">
-                  <div class="hero-play-action">
-                    <button id="btn-launch-game" class="btn-launch primary-glow">
-                      <span class="btn-icon">▶</span>
-                      <span class="btn-text">起動する (Play)</span>
-                    </button>
-                    <span class="launch-status ready">起動可能</span>
-                  </div>
-                  <nav class="detail-jump-actions" aria-label="詳細画面内の移動">
-                    <button id="btn-jump-ranking" class="detail-jump-button" type="button" hidden>🏆 ランキング</button>
-                    <button id="btn-jump-comments" class="detail-jump-button" type="button">💬 コメント</button>
-                  </nav>
-                </div>
+                <nav class="detail-jump-actions" aria-label="詳細画面内の移動">
+                  <button id="btn-jump-ranking" class="detail-jump-button" type="button" hidden>🏆 ランキング</button>
+                  <button id="btn-jump-comments" class="detail-jump-button" type="button">💬 コメント</button>
+                </nav>
               </div>
             </div>
+          </div>
 
-            <div class="detail-summary">
-              <div class="description-box glass-inset">
-                <h4 class="box-title">📖 ゲーム概要 (Description)</h4>
-                <p id="modal-description" class="description-text">説明文がここに入ります。</p>
-              </div>
+          <div class="detail-summary">
+            <div class="description-box glass-inset">
+              <h4 class="box-title">📖 ゲーム概要 (Description)</h4>
+              <p id="modal-description" class="description-text">説明文がここに入ります。</p>
             </div>
-          </main>
+          </div>
         </div>
       </div>
     </div>

@@ -606,19 +606,19 @@ body {
   transform: scale(0.95) translateY(20px);
 }
 
-/* ゲーム詳細は画面全体を使い、サムネイルを主役として表示する。 */
+/* ゲーム詳細は余白を残した大型モーダルで、サムネイルを主役として表示する。 */
 #detail-modal {
-  padding: 0;
+  padding: clamp(14px, 2.5vw, 30px);
 }
 
 #detail-modal .modal-container {
-  width: 100vw;
-  height: 100vh;
-  max-width: none;
-  max-height: none;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
+  width: min(94vw, 1280px);
+  height: min(92vh, 900px);
+  max-width: 1280px;
+  max-height: 900px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: clamp(20px, 3vw, 32px);
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.34), 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 
 #detail-modal.hidden .modal-container {
@@ -654,7 +654,7 @@ body {
 
 /* Modal Header Banner */
 .modal-header-banner {
-  flex: 0 0 clamp(300px, 52vh, 560px);
+  flex: 0 0 clamp(290px, 46vh, 500px);
   min-height: 300px;
   position: relative;
   background-color: #0F172A;

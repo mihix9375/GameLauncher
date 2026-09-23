@@ -9,6 +9,7 @@ import { renderGames } from "../games/renderGames.js";
 import { submitComment } from "../comments/comments.js";
 import { setCommunityTab } from "../ui/communityTabs.js";
 import { updateGameCount } from "../ui/counter.js";
+import { formatError } from "../core/errors.js";
 
 export function setupEventListeners() {
 	const searchInput = document.getElementById("search-input");
@@ -156,7 +157,16 @@ export function setupEventListeners() {
 					await loadGames();
 				} catch (e) {
 					console.error("Auto download error:", e);
-					setLogText(`[エラー] ${item.game_id} のダウンロード失敗: ${e}`);
+					const failedGame = getAllGames().find(game => {
+						const id = (game.id || game.game || "").replace(/\.exe$/i, "");
+						return id.toLocaleLowerCase() === item.cleanId.toLocaleLowerCase();
+					});
+					if (failedGame?.isInstalled === false) {
+						removeGameById(item.cleanId);
+						renderGames(getAllGames());
+						updateGameCount(getAllGames().length);
+					}
+					setLogText(`[エラー] ${item.game_id} のダウンロード失敗: ${formatError(e, "サーバーで配布されていない可能性があります")}`);
 				} finally {
 					pendingGameIds.delete(item.cleanId);
 				}

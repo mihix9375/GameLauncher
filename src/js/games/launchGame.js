@@ -1,11 +1,16 @@
 import { invoke } from "../core/tauri.js";
 import { setLogText } from "../ui/log.js";
+import { formatError } from "../core/errors.js";
+import { getAllGames, removeGameById } from "../core/state.js";
+import { renderGames } from "./renderGames.js";
+import { updateGameCount } from "../ui/counter.js";
+import { closeModal } from "../ui/modal.js";
 
 export async function launchGame(game) {
 	try {
 		setLogText(`${game.title} を起動中...`);
 		const launchBtn = document.getElementById("btn-launch-game");
-		const originalText = launchBtn.innerHTML;
+		const originalText = launchBtn?.innerHTML || "";
 
 		if (launchBtn) {
 			launchBtn.innerHTML = `<span class="btn-icon">⏳</span><span class="btn-text">起動処理中...</span>`;
@@ -24,8 +29,9 @@ export async function launchGame(game) {
 					if (res && res.latest_version) {
 						game._latestVersion = res.latest_version;
 					}
-				} catch (e) {
-					needsDownload = true;
+				} catch (error) {
+					console.warn("Version check failed:", error);
+					needsDownload = game.isInstalled === false;
 				}
 			}
 
@@ -33,6 +39,7 @@ export async function launchGame(game) {
 				setLogText(`${game.title} をダウンロード/更新中...`);
 				await invoke("download_game", { gameId: targetId, version: game._latestVersion || game.version });
 				game._needsUpdate = false;
+				game.isInstalled = true;
 				if (game._latestVersion) {
 					game.version = game._latestVersion;
 				}
@@ -62,8 +69,21 @@ export async function launchGame(game) {
 
 	} catch (error) {
 		console.error("Launch error:", error);
-		setLogText(`エラー: ${game.title} の起動に失敗しました`);
-		alert(`ゲームの起動時にエラーが発生しました。\n詳細: ${error}`);
+		const wasRemoteOnly = game.isInstalled === false;
+		const detail = formatError(
+			error,
+			wasRemoteOnly
+				? "サーバーからゲームを取得できませんでした。配布が終了している可能性があります。"
+				: "ゲームを起動できませんでした。",
+		);
+		if (wasRemoteOnly) {
+			removeGameById(game.id || game.game);
+			renderGames(getAllGames());
+			updateGameCount(getAllGames().length);
+			closeModal("detail-modal");
+		}
+		setLogText(`エラー: ${game.title} の起動に失敗しました (${detail})`);
+		alert(`ゲームの起動時にエラーが発生しました。\n詳細: ${detail}`);
 
 		const launchBtn = document.getElementById("btn-launch-game");
 		if (launchBtn) {

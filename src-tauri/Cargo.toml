@@ -1,6 +1,6 @@
 [package]
 name = "gamelauncher"
-version = "0.3.0"
+version = "0.4.0"
 description = "GameLauncher"
 authors = ["mihix9375"]
 edition = "2021"

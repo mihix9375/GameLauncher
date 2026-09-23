@@ -18,17 +18,30 @@ export async function openDetailModal(game, meta) {
 	document.getElementById("modal-description").textContent = merged.description || "説明文はありません。";
 
 	const bannerEl = document.getElementById("modal-banner");
+	const bannerImage = document.getElementById("modal-banner-image");
+	const bannerBackdrop = document.getElementById("modal-banner-backdrop");
 	if (bannerEl) {
 		if (game.image && game.image.length > 5) {
-			bannerEl.style.backgroundImage = `url("${game.image}")`;
-			bannerEl.style.backgroundSize = "contain";
-			bannerEl.style.backgroundPosition = "center";
-			bannerEl.style.backgroundRepeat = "no-repeat";
+			bannerEl.style.backgroundImage = "";
+			if (bannerImage) {
+				bannerImage.src = game.image;
+				bannerImage.alt = `${merged.title || game.title || "ゲーム"}のサムネイル`;
+				bannerImage.hidden = false;
+			}
+			if (bannerBackdrop) {
+				bannerBackdrop.src = game.image;
+				bannerBackdrop.hidden = false;
+			}
 		} else {
 			bannerEl.style.backgroundImage = "";
-			bannerEl.style.backgroundSize = "";
-			bannerEl.style.backgroundPosition = "";
-			bannerEl.style.backgroundRepeat = "";
+			if (bannerImage) {
+				bannerImage.removeAttribute("src");
+				bannerImage.hidden = true;
+			}
+			if (bannerBackdrop) {
+				bannerBackdrop.removeAttribute("src");
+				bannerBackdrop.hidden = true;
+			}
 		}
 	}
 

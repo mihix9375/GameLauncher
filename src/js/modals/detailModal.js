@@ -8,8 +8,10 @@ import { loadLeaderboards } from "../leaderboards/leaderboards.js";
 export async function openDetailModal(game, meta) {
 	setSelectedGame(game);
 	const merged = Object.assign({}, meta || {}, game);
-	const modalBody = document.querySelector("#detail-modal .modal-body");
-	if (modalBody) modalBody.scrollTop = 0;
+	const sidebar = document.querySelector("#detail-modal .detail-sidebar");
+	const summary = document.querySelector("#detail-modal .detail-summary");
+	if (sidebar) sidebar.scrollTop = 0;
+	if (summary) summary.scrollTop = 0;
 
 	document.getElementById("modal-title").textContent = merged.title || game.title;
 	document.getElementById("modal-version").textContent = merged.version || game.version || "v1.0.0";

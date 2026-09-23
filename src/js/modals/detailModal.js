@@ -58,7 +58,6 @@ function updateBannerPalette(banner, image) {
 		const edge = [red, green, blue].map(channel => Math.round(channel * edgeScale));
 		const panel = edge.map(channel => Math.round(channel * 0.32));
 		banner.style.setProperty("--banner-edge-color", `rgb(${edge.join(", ")})`);
-		banner.style.setProperty("--banner-edge-fade", `rgba(${edge.join(", ")}, 0.42)`);
 		banner.style.setProperty("--banner-panel-color", `rgb(${panel.join(", ")})`);
 	} catch {
 		// Canvas access can be blocked for remote images; CSS defaults remain usable.
@@ -83,10 +82,8 @@ export async function openDetailModal(game, meta) {
 	const bannerEl = document.getElementById("modal-banner");
 	const bannerImage = document.getElementById("modal-banner-image");
 	const bannerBackdrop = document.getElementById("modal-banner-backdrop");
-	const contentBackdrop = document.getElementById("modal-content-backdrop");
 	if (bannerEl) {
 		bannerEl.style.removeProperty("--banner-edge-color");
-		bannerEl.style.removeProperty("--banner-edge-fade");
 		bannerEl.style.removeProperty("--banner-panel-color");
 		if (game.image && game.image.length > 5) {
 			bannerEl.style.backgroundImage = "";
@@ -101,16 +98,11 @@ export async function openDetailModal(game, meta) {
 					bannerEl.classList.remove("is-widescreen");
 					bannerImage.hidden = true;
 					if (bannerBackdrop) bannerBackdrop.hidden = true;
-					if (contentBackdrop) contentBackdrop.hidden = true;
 				};
 				bannerImage.src = game.image;
 				bannerImage.alt = `${merged.title || game.title || "ゲーム"}のサムネイル`;
 				bannerImage.hidden = false;
 				if (bannerImage.complete) updateBannerImageMode(bannerEl, bannerImage, bannerBackdrop);
-			}
-			if (contentBackdrop) {
-				contentBackdrop.src = game.image;
-				contentBackdrop.hidden = false;
 			}
 		} else {
 			bannerEl.style.backgroundImage = "";
@@ -124,10 +116,6 @@ export async function openDetailModal(game, meta) {
 			if (bannerBackdrop) {
 				bannerBackdrop.removeAttribute("src");
 				bannerBackdrop.hidden = true;
-			}
-			if (contentBackdrop) {
-				contentBackdrop.removeAttribute("src");
-				contentBackdrop.hidden = true;
 			}
 		}
 	}

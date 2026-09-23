@@ -788,10 +788,7 @@ body {
 
 /* Modal Header Banner */
 .modal-header-banner {
-  --banner-blend-depth: clamp(72px, 8vw, 112px);
-  --banner-blend-midpoint: clamp(32px, 3.6vw, 50px);
   --banner-edge-color: #0F172A;
-  --banner-edge-fade: rgba(15, 23, 42, 0.42);
   --banner-panel-color: #080D18;
   position: relative;
   background-color: #0F172A;
@@ -846,72 +843,20 @@ body {
   filter: none;
 }
 
-.banner-gradient {
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  width: 100%;
-  height: var(--banner-blend-depth);
-  z-index: 1;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    var(--banner-edge-fade) 38%,
-    var(--banner-edge-color) 100%
-  );
-}
-
 .banner-content {
   position: relative;
   z-index: 2;
   width: 100%;
-  margin-top: calc(0px - var(--banner-blend-depth));
-  padding: calc(20px + var(--banner-blend-depth)) clamp(22px, 3vw, 36px) 24px;
+  margin-top: -1px;
+  padding: 22px clamp(22px, 3vw, 36px) 24px;
   overflow: hidden;
-  background: transparent;
-}
-
-.banner-content::before {
-  content: "";
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  background: linear-gradient(180deg, var(--banner-edge-color) 0%, var(--banner-panel-color) 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 var(--banner-blend-depth));
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 var(--banner-blend-depth));
-  pointer-events: none;
-}
-
-.banner-content-backdrop {
-  position: absolute;
-  z-index: 1;
-  inset: 0 -8% -40%;
-  width: 116%;
-  height: 140%;
-  object-fit: cover;
-  object-position: center bottom;
-  filter: blur(32px) saturate(1.15) brightness(0.58);
-  transform: scale(1.08);
-  opacity: 0.88;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.28) var(--banner-blend-midpoint), #000 var(--banner-blend-depth));
-  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.28) var(--banner-blend-midpoint), #000 var(--banner-blend-depth));
-  pointer-events: none;
-  user-select: none;
-}
-
-.banner-content::after {
-  content: "";
-  position: absolute;
-  z-index: 2;
-  inset: 0;
-  background: linear-gradient(180deg, transparent 0%, rgba(8, 13, 24, 0.22) 32%, rgba(8, 13, 24, 0.72) 100%);
-  pointer-events: none;
-}
-
-.banner-content > :not(.banner-content-backdrop) {
-  position: relative;
-  z-index: 3;
+  background: linear-gradient(
+    180deg,
+    var(--banner-edge-color) 0%,
+    var(--banner-edge-color) 8%,
+    var(--banner-panel-color) 72%,
+    #080D18 100%
+  );
 }
 
 .modal-title {
@@ -1007,7 +952,7 @@ body {
 
 @media (max-width: 800px) {
   .banner-content {
-    padding: calc(16px + var(--banner-blend-depth)) 18px 20px;
+    padding: 18px 18px 20px;
   }
 
   .modal-title {

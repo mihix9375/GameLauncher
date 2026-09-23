@@ -66,6 +66,12 @@ export function setupEventListeners() {
 
 	document.getElementById("btn-close-modal")?.addEventListener("click", () => closeModal("detail-modal"));
 	document.getElementById("modal-backdrop")?.addEventListener("click", () => closeModal("detail-modal"));
+	document.getElementById("btn-jump-ranking")?.addEventListener("click", () => {
+		document.getElementById("leaderboard-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+	});
+	document.getElementById("btn-jump-comments")?.addEventListener("click", () => {
+		document.getElementById("comment-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+	});
 	
 	document.getElementById("btn-close-settings")?.addEventListener("click", () => closeModal("settings-modal"));
 	document.getElementById("settings-backdrop")?.addEventListener("click", () => closeModal("settings-modal"));

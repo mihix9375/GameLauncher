@@ -8,6 +8,8 @@ import { loadLeaderboards } from "../leaderboards/leaderboards.js";
 export async function openDetailModal(game, meta) {
 	setSelectedGame(game);
 	const merged = Object.assign({}, meta || {}, game);
+	const modalBody = document.querySelector("#detail-modal .modal-body");
+	if (modalBody) modalBody.scrollTop = 0;
 
 	document.getElementById("modal-title").textContent = merged.title || game.title;
 	document.getElementById("modal-version").textContent = merged.version || game.version || "v1.0.0";
@@ -19,10 +21,14 @@ export async function openDetailModal(game, meta) {
 	if (bannerEl) {
 		if (game.image && game.image.length > 5) {
 			bannerEl.style.backgroundImage = `url("${game.image}")`;
-			bannerEl.style.backgroundSize = "cover";
+			bannerEl.style.backgroundSize = "contain";
 			bannerEl.style.backgroundPosition = "center";
+			bannerEl.style.backgroundRepeat = "no-repeat";
 		} else {
 			bannerEl.style.backgroundImage = "";
+			bannerEl.style.backgroundSize = "";
+			bannerEl.style.backgroundPosition = "";
+			bannerEl.style.backgroundRepeat = "";
 		}
 	}
 

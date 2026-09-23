@@ -95,6 +95,19 @@
               <span id="modal-author" class="meta-badge author-badge">ゲーム開発研究部</span>
               <span id="modal-date" class="meta-badge date-badge">2026/07/07</span>
             </div>
+            <div class="hero-actions">
+              <div class="hero-play-action">
+                <button id="btn-launch-game" class="btn-launch primary-glow">
+                  <span class="btn-icon">▶</span>
+                  <span class="btn-text">起動する (Play)</span>
+                </button>
+                <span class="launch-status ready">起動可能</span>
+              </div>
+              <nav class="detail-jump-actions" aria-label="詳細画面内の移動">
+                <button id="btn-jump-ranking" class="detail-jump-button" type="button" hidden>🏆 ランキングを見る</button>
+                <button id="btn-jump-comments" class="detail-jump-button" type="button">💬 コメントを見る</button>
+              </nav>
+            </div>
           </div>
         </div>
 
@@ -109,20 +122,6 @@
             </div>
           </div>
 
-          <div class="modal-right">
-            <div class="launch-card glass-inset">
-              <div class="launch-info">
-                <span class="launch-label">ステータス</span>
-                <span class="launch-status ready">🟢 起動可能</span>
-              </div>
-              <button id="btn-launch-game" class="btn-launch primary-glow">
-                <span class="btn-icon">▶</span>
-                <span class="btn-text">起動する (Play)</span>
-              </button>
-              <p class="launch-note">クリックでゲームアプリケーションを開始します</p>
-            </div>
-          </div>
-
           <section id="leaderboard-section" class="leaderboard-section glass-inset" aria-labelledby="leaderboard-heading" hidden>
             <div class="leaderboard-heading-row">
               <h4 id="leaderboard-heading" class="box-title">🏆 ランキング</h4>
@@ -131,7 +130,7 @@
             <div id="leaderboard-list" class="leaderboard-list"></div>
           </section>
 
-          <section class="comment-section glass-inset" aria-labelledby="comment-heading">
+          <section id="comment-section" class="comment-section glass-inset" aria-labelledby="comment-heading">
             <div class="comment-heading-row">
               <h4 id="comment-heading" class="box-title">💬 コメント</h4>
               <span id="comment-count" class="comment-count">0件</span>

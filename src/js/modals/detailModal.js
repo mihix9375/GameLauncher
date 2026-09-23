@@ -12,6 +12,57 @@ function updateBannerImageMode(banner, image, backdrop) {
 	const isWidescreen = Math.abs(ratio - (16 / 9)) < 0.01;
 	banner.classList.toggle("is-widescreen", isWidescreen);
 	if (backdrop) backdrop.hidden = isWidescreen;
+	updateBannerPalette(banner, image);
+}
+
+function updateBannerPalette(banner, image) {
+	try {
+		const canvas = document.createElement("canvas");
+		canvas.width = 48;
+		canvas.height = 6;
+		const context = canvas.getContext("2d", { willReadFrequently: true });
+		if (!context) return;
+
+		const sampleHeight = Math.max(1, Math.round(image.naturalHeight * 0.08));
+		context.drawImage(
+			image,
+			0,
+			image.naturalHeight - sampleHeight,
+			image.naturalWidth,
+			sampleHeight,
+			0,
+			0,
+			canvas.width,
+			canvas.height,
+		);
+
+		const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+		let red = 0;
+		let green = 0;
+		let blue = 0;
+		let samples = 0;
+		for (let index = 0; index < pixels.length; index += 4) {
+			if (pixels[index + 3] < 32) continue;
+			red += pixels[index];
+			green += pixels[index + 1];
+			blue += pixels[index + 2];
+			samples += 1;
+		}
+		if (!samples) return;
+
+		red = Math.round(red / samples);
+		green = Math.round(green / samples);
+		blue = Math.round(blue / samples);
+		const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+		const edgeScale = Math.min(1, 110 / Math.max(luminance, 1));
+		const edge = [red, green, blue].map(channel => Math.round(channel * edgeScale));
+		const panel = edge.map(channel => Math.round(channel * 0.32));
+		banner.style.setProperty("--banner-edge-color", `rgb(${edge.join(", ")})`);
+		banner.style.setProperty("--banner-edge-fade", `rgba(${edge.join(", ")}, 0.42)`);
+		banner.style.setProperty("--banner-panel-color", `rgb(${panel.join(", ")})`);
+	} catch {
+		// Canvas access can be blocked for remote images; CSS defaults remain usable.
+	}
 }
 
 export async function openDetailModal(game, meta) {
@@ -32,7 +83,11 @@ export async function openDetailModal(game, meta) {
 	const bannerEl = document.getElementById("modal-banner");
 	const bannerImage = document.getElementById("modal-banner-image");
 	const bannerBackdrop = document.getElementById("modal-banner-backdrop");
+	const contentBackdrop = document.getElementById("modal-content-backdrop");
 	if (bannerEl) {
+		bannerEl.style.removeProperty("--banner-edge-color");
+		bannerEl.style.removeProperty("--banner-edge-fade");
+		bannerEl.style.removeProperty("--banner-panel-color");
 		if (game.image && game.image.length > 5) {
 			bannerEl.style.backgroundImage = "";
 			bannerEl.classList.remove("is-widescreen");
@@ -46,11 +101,16 @@ export async function openDetailModal(game, meta) {
 					bannerEl.classList.remove("is-widescreen");
 					bannerImage.hidden = true;
 					if (bannerBackdrop) bannerBackdrop.hidden = true;
+					if (contentBackdrop) contentBackdrop.hidden = true;
 				};
 				bannerImage.src = game.image;
 				bannerImage.alt = `${merged.title || game.title || "ゲーム"}のサムネイル`;
 				bannerImage.hidden = false;
 				if (bannerImage.complete) updateBannerImageMode(bannerEl, bannerImage, bannerBackdrop);
+			}
+			if (contentBackdrop) {
+				contentBackdrop.src = game.image;
+				contentBackdrop.hidden = false;
 			}
 		} else {
 			bannerEl.style.backgroundImage = "";
@@ -64,6 +124,10 @@ export async function openDetailModal(game, meta) {
 			if (bannerBackdrop) {
 				bannerBackdrop.removeAttribute("src");
 				bannerBackdrop.hidden = true;
+			}
+			if (contentBackdrop) {
+				contentBackdrop.removeAttribute("src");
+				contentBackdrop.hidden = true;
 			}
 		}
 	}

@@ -5,6 +5,14 @@ import { setLogText } from "../ui/log.js";
 import { loadComments } from "../comments/comments.js";
 import { loadLeaderboards } from "../leaderboards/leaderboards.js";
 
+function updateBannerImageMode(banner, image, backdrop) {
+	if (!image.naturalWidth || !image.naturalHeight) return;
+	const ratio = image.naturalWidth / image.naturalHeight;
+	const isWidescreen = Math.abs(ratio - (16 / 9)) < 0.01;
+	banner.classList.toggle("is-widescreen", isWidescreen);
+	if (backdrop) backdrop.hidden = isWidescreen;
+}
+
 export async function openDetailModal(game, meta) {
 	setSelectedGame(game);
 	const merged = Object.assign({}, meta || {}, game);
@@ -25,18 +33,29 @@ export async function openDetailModal(game, meta) {
 	if (bannerEl) {
 		if (game.image && game.image.length > 5) {
 			bannerEl.style.backgroundImage = "";
-			if (bannerImage) {
-				bannerImage.src = game.image;
-				bannerImage.alt = `${merged.title || game.title || "ゲーム"}のサムネイル`;
-				bannerImage.hidden = false;
-			}
+			bannerEl.classList.remove("is-widescreen");
 			if (bannerBackdrop) {
 				bannerBackdrop.src = game.image;
 				bannerBackdrop.hidden = false;
 			}
+			if (bannerImage) {
+				bannerImage.onload = () => updateBannerImageMode(bannerEl, bannerImage, bannerBackdrop);
+				bannerImage.onerror = () => {
+					bannerEl.classList.remove("is-widescreen");
+					bannerImage.hidden = true;
+					if (bannerBackdrop) bannerBackdrop.hidden = true;
+				};
+				bannerImage.src = game.image;
+				bannerImage.alt = `${merged.title || game.title || "ゲーム"}のサムネイル`;
+				bannerImage.hidden = false;
+				if (bannerImage.complete) updateBannerImageMode(bannerEl, bannerImage, bannerBackdrop);
+			}
 		} else {
 			bannerEl.style.backgroundImage = "";
+			bannerEl.classList.remove("is-widescreen");
 			if (bannerImage) {
+				bannerImage.onload = null;
+				bannerImage.onerror = null;
 				bannerImage.removeAttribute("src");
 				bannerImage.hidden = true;
 			}

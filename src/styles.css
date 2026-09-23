@@ -628,11 +628,13 @@ body {
 .detail-layout {
   display: grid;
   grid-template-columns: clamp(220px, 27%, 300px) minmax(0, 1fr);
+  gap: 16px;
   flex: 1;
   min-width: 0;
   min-height: 0;
+  padding: 16px;
   overflow: hidden;
-  background: #FFFFFF;
+  background: #EEF2F7;
 }
 
 .detail-sidebar {
@@ -641,10 +643,9 @@ body {
   gap: 14px;
   min-width: 0;
   min-height: 0;
-  padding: 16px;
+  padding: 0;
   overflow-y: auto;
-  background: #F8FAFC;
-  border-right: 1px solid var(--glass-border);
+  background: transparent;
 }
 
 .detail-main {
@@ -652,30 +653,40 @@ body {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: #FFFFFF;
+  gap: 14px;
+  overflow-y: auto;
+  background: transparent;
 }
 
 .detail-main .modal-header-banner {
-  flex: 1 1 auto;
-  min-height: 300px;
+  flex: 0 0 auto;
+  min-height: 0;
+  aspect-ratio: 16 / 9;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 20px;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
 }
 
 .detail-summary {
   flex: 0 0 auto;
   max-height: 180px;
-  padding: 16px 20px 18px;
+  padding: 0;
   overflow-y: auto;
-  background: #FFFFFF;
+  background: transparent;
 }
 
 .detail-summary .glass-inset {
-  padding: 16px 18px;
+  padding: 18px 20px;
+  background: #FFFFFF;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
 .detail-sidebar .glass-inset {
   flex: 0 0 auto;
   padding: 14px;
   border-radius: 16px;
+  background: #FFFFFF;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
 .detail-sidebar .leaderboard-list {
@@ -762,6 +773,15 @@ body {
   object-fit: contain;
   object-position: center;
   filter: drop-shadow(0 0 22px rgba(15, 23, 42, 0.34));
+}
+
+.modal-header-banner.is-widescreen .modal-banner-backdrop {
+  display: none;
+}
+
+.modal-header-banner.is-widescreen .modal-banner-image {
+  object-fit: cover;
+  filter: none;
 }
 
 .banner-gradient {
@@ -899,15 +919,14 @@ body {
   }
 
   .detail-main .modal-header-banner {
-    min-height: 380px;
+    min-height: 0;
   }
 
   .detail-sidebar {
     flex: 0 0 auto;
     order: 2;
     overflow: visible;
-    border-top: 1px solid var(--glass-border);
-    border-right: 0;
+    border: 0;
   }
 
   .detail-summary {

@@ -3,11 +3,12 @@ import { filterAndRenderGames } from "../games/filterGames.js";
 import { loadGames } from "../games/loadGames.js";
 import { openModal, closeModal } from "../ui/modal.js";
 import { setLogText } from "../ui/log.js";
-import { getSelectedGame, setGameUpdateFlag, getAllGames } from "../core/state.js";
+import { getSelectedGame, setGameUpdateFlag, getAllGames, removeGameById } from "../core/state.js";
 import { launchGame } from "../games/launchGame.js";
 import { renderGames } from "../games/renderGames.js";
 import { submitComment } from "../comments/comments.js";
 import { setCommunityTab } from "../ui/communityTabs.js";
+import { updateGameCount } from "../ui/counter.js";
 
 export function setupEventListeners() {
 	const searchInput = document.getElementById("search-input");
@@ -193,6 +194,14 @@ export function setupEventListeners() {
 				console.error("Server deletion error:", payload.error);
 				setLogText(`[エラー] ${cleanId} を削除できませんでした: ${payload.error}`);
 				return;
+			}
+			const selectedGame = getSelectedGame();
+			const selectedId = (selectedGame?.id || selectedGame?.game || "").replace(/\.exe$/i, "");
+			removeGameById(cleanId);
+			renderGames(getAllGames());
+			updateGameCount(getAllGames().length);
+			if (selectedId.toLocaleLowerCase() === cleanId.toLocaleLowerCase()) {
+				closeModal("detail-modal");
 			}
 			await loadGames();
 			setLogText(payload.deleted

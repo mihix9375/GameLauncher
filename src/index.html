@@ -86,31 +86,38 @@
         
         <div class="detail-layout">
           <aside class="detail-sidebar" aria-label="コミュニティ情報">
-            <section id="comment-section" class="comment-section glass-inset" aria-labelledby="comment-heading">
-              <div class="comment-heading-row">
-                <h4 id="comment-heading" class="box-title">💬 コメント</h4>
-                <span id="comment-count" class="comment-count">0件</span>
+            <div class="community-panel glass-inset">
+              <div class="community-tabs" role="tablist" aria-label="コミュニティ表示">
+                <button id="tab-comments" class="community-tab active" type="button" role="tab" aria-controls="comment-section" aria-selected="true">💬 コメント</button>
+                <button id="tab-ranking" class="community-tab" type="button" role="tab" aria-controls="leaderboard-section" aria-selected="false" tabindex="-1" hidden>🏆 ランキング</button>
               </div>
-              <div id="comment-list" class="comment-list" aria-live="polite">
-                <p class="comment-message">コメントを読み込んでいます...</p>
-              </div>
-              <div class="comment-form">
-                <input id="comment-author" class="comment-input" type="text" maxlength="40" placeholder="名前（任意）" />
-                <textarea id="comment-content" class="comment-input comment-textarea" maxlength="1000" rows="3" placeholder="コメントを入力"></textarea>
-                <div class="comment-submit-row">
-                  <span id="comment-length" class="comment-length">0 / 1000</span>
-                  <button id="btn-submit-comment" class="btn-comment-submit" type="button">投稿</button>
-                </div>
-              </div>
-            </section>
 
-            <section id="leaderboard-section" class="leaderboard-section glass-inset" aria-labelledby="leaderboard-heading" hidden>
-              <div class="leaderboard-heading-row">
-                <h4 id="leaderboard-heading" class="box-title">🏆 ランキング</h4>
-                <span>TOP 10</span>
-              </div>
-              <div id="leaderboard-list" class="leaderboard-list"></div>
-            </section>
+              <section id="comment-section" class="comment-section community-tab-panel" role="tabpanel" aria-labelledby="tab-comments">
+                <div class="comment-heading-row">
+                  <span class="panel-caption">コメント一覧</span>
+                  <span id="comment-count" class="comment-count">0件</span>
+                </div>
+                <div id="comment-list" class="comment-list" aria-live="polite">
+                  <p class="comment-message">コメントを読み込んでいます...</p>
+                </div>
+                <div class="comment-form">
+                  <input id="comment-author" class="comment-input" type="text" maxlength="40" placeholder="名前（任意）" />
+                  <textarea id="comment-content" class="comment-input comment-textarea" maxlength="1000" rows="3" placeholder="コメントを入力"></textarea>
+                  <div class="comment-submit-row">
+                    <span id="comment-length" class="comment-length">0 / 1000</span>
+                    <button id="btn-submit-comment" class="btn-comment-submit" type="button">投稿</button>
+                  </div>
+                </div>
+              </section>
+
+              <section id="leaderboard-section" class="leaderboard-section community-tab-panel" role="tabpanel" aria-labelledby="tab-ranking" hidden>
+                <div class="leaderboard-heading-row">
+                  <span class="panel-caption">ランキング</span>
+                  <span>TOP 10</span>
+                </div>
+                <div id="leaderboard-list" class="leaderboard-list"></div>
+              </section>
+            </div>
           </aside>
 
           <div class="modal-header-banner" id="modal-banner">

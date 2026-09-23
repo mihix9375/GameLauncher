@@ -629,7 +629,7 @@ body {
 
 .detail-layout {
   display: grid;
-  grid-template-columns: clamp(220px, 27%, 300px) minmax(0, 1fr);
+  grid-template-columns: clamp(300px, 32%, 400px) minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 16px;
   flex: 1;
@@ -645,11 +645,10 @@ body {
   grid-row: 1 / -1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
   min-width: 0;
   min-height: 0;
   padding: 0;
-  overflow-y: auto;
+  overflow: hidden;
   background: transparent;
 }
 
@@ -679,11 +678,68 @@ body {
 }
 
 .detail-sidebar .glass-inset {
-  flex: 0 0 auto;
-  padding: 14px;
+  padding: 18px;
   border-radius: 16px;
   background: #FFFFFF;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.community-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.community-tabs {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border-radius: 13px;
+  background: #EEF2F7;
+}
+
+.community-tab {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: 800 13px/1.3 var(--font-main);
+  transition: color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+
+.community-tab:hover {
+  color: var(--accent-blue);
+}
+
+.community-tab.active {
+  background: #FFFFFF;
+  color: var(--accent-blue);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.1);
+}
+
+.community-tab[hidden] {
+  display: none;
+}
+
+.community-tab-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+.community-tab-panel[hidden] {
+  display: none;
+}
+
+.panel-caption {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .detail-sidebar .leaderboard-list {
@@ -701,7 +757,7 @@ body {
 }
 
 .detail-sidebar .comment-list {
-  height: 150px;
+  height: auto;
 }
 
 .btn-close {
@@ -922,6 +978,10 @@ body {
     border: 0;
   }
 
+  .community-panel {
+    min-height: 540px;
+  }
+
   .detail-summary {
     order: 2;
     max-height: none;
@@ -957,9 +1017,9 @@ body {
 
 /* Game Comments */
 .leaderboard-section {
-  grid-column: 1 / -1;
+  overflow-y: auto;
   min-width: 0;
-  padding: 18px 20px;
+  padding: 16px 2px 0;
   scroll-margin-top: 20px;
 }
 
@@ -988,9 +1048,11 @@ body {
 @media (max-width: 650px) { .leaderboard-list { grid-template-columns: 1fr; } }
 
 .comment-section {
-  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  padding: 18px 20px;
+  min-height: 0;
+  padding: 16px 2px 0;
   scroll-margin-top: 20px;
 }
 
@@ -1017,7 +1079,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: 132px;
+  flex: 1;
+  min-height: 220px;
   margin-top: 12px;
   padding-right: 4px;
   overflow-y: auto;

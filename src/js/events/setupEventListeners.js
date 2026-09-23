@@ -7,6 +7,7 @@ import { getSelectedGame, setGameUpdateFlag, getAllGames } from "../core/state.j
 import { launchGame } from "../games/launchGame.js";
 import { renderGames } from "../games/renderGames.js";
 import { submitComment } from "../comments/comments.js";
+import { setCommunityTab } from "../ui/communityTabs.js";
 
 export function setupEventListeners() {
 	const searchInput = document.getElementById("search-input");
@@ -66,11 +67,15 @@ export function setupEventListeners() {
 
 	document.getElementById("btn-close-modal")?.addEventListener("click", () => closeModal("detail-modal"));
 	document.getElementById("modal-backdrop")?.addEventListener("click", () => closeModal("detail-modal"));
+	document.getElementById("tab-comments")?.addEventListener("click", () => setCommunityTab("comments"));
+	document.getElementById("tab-ranking")?.addEventListener("click", () => setCommunityTab("ranking"));
 	document.getElementById("btn-jump-ranking")?.addEventListener("click", () => {
-		document.getElementById("leaderboard-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+		setCommunityTab("ranking");
+		document.querySelector("#detail-modal .detail-sidebar")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 	});
 	document.getElementById("btn-jump-comments")?.addEventListener("click", () => {
-		document.getElementById("comment-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+		setCommunityTab("comments");
+		document.querySelector("#detail-modal .detail-sidebar")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 	});
 	
 	document.getElementById("btn-close-settings")?.addEventListener("click", () => closeModal("settings-modal"));

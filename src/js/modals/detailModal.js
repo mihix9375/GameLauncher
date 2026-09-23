@@ -4,6 +4,7 @@ import { openModal } from "../ui/modal.js";
 import { setLogText } from "../ui/log.js";
 import { loadComments } from "../comments/comments.js";
 import { loadLeaderboards } from "../leaderboards/leaderboards.js";
+import { setCommunityTab } from "../ui/communityTabs.js";
 
 function updateBannerImageMode(banner, image, backdrop) {
 	if (!image.naturalWidth || !image.naturalHeight) return;
@@ -20,6 +21,7 @@ export async function openDetailModal(game, meta) {
 	const summary = document.querySelector("#detail-modal .detail-summary");
 	if (sidebar) sidebar.scrollTop = 0;
 	if (summary) summary.scrollTop = 0;
+	setCommunityTab("comments");
 
 	document.getElementById("modal-title").textContent = merged.title || game.title;
 	document.getElementById("modal-version").textContent = merged.version || game.version || "v1.0.0";

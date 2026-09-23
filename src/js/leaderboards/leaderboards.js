@@ -49,11 +49,13 @@ export async function loadLeaderboards(game) {
 	const section = document.getElementById("leaderboard-section");
 	const list = document.getElementById("leaderboard-list");
 	const jumpButton = document.getElementById("btn-jump-ranking");
+	const tabButton = document.getElementById("tab-ranking");
 	if (!section || !list) {
 		return;
 	}
 	section.hidden = true;
 	if (jumpButton) jumpButton.hidden = true;
+	if (tabButton) tabButton.hidden = true;
 	list.replaceChildren();
 	if (!window.__TAURI__) {
 		return;
@@ -66,8 +68,8 @@ export async function loadLeaderboards(game) {
 		for (const board of boards.slice(0, 2)) {
 			list.append(renderBoard(board));
 		}
-		section.hidden = false;
 		if (jumpButton) jumpButton.hidden = false;
+		if (tabButton) tabButton.hidden = false;
 	} catch (error) {
 		console.warn("get_leaderboards error:", error);
 	}

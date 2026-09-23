@@ -606,6 +606,159 @@ body {
   transform: scale(0.95) translateY(20px);
 }
 
+/* ゲーム詳細は共通の外箱を持たず、各パネルを同じ階層のカードとして配置する。 */
+#detail-modal {
+  padding: clamp(14px, 2.5vw, 30px);
+}
+
+#detail-modal .modal-container {
+  width: min(94vw, 1280px);
+  height: min(92vh, 900px);
+  max-width: 1280px;
+  max-height: 900px;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+#detail-modal.hidden .modal-container {
+  transform: scale(1.015) translateY(12px);
+}
+
+.detail-layout {
+  display: grid;
+  grid-template-columns: clamp(300px, 32%, 400px) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+}
+
+.detail-sidebar {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.detail-layout > .modal-header-banner {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 20px;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
+}
+
+.detail-summary {
+  grid-column: 2;
+  grid-row: 2;
+  max-height: 180px;
+  padding: 0;
+  overflow-y: auto;
+  background: transparent;
+}
+
+.detail-summary .glass-inset {
+  padding: 18px 20px;
+  background: #FFFFFF;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.detail-sidebar .glass-inset {
+  padding: 18px;
+  border-radius: 16px;
+  background: #FFFFFF;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.community-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.community-tabs {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border-radius: 13px;
+  background: #EEF2F7;
+}
+
+.community-tab {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: 800 13px/1.3 var(--font-main);
+  transition: color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+
+.community-tab:hover {
+  color: var(--accent-blue);
+}
+
+.community-tab.active {
+  background: #FFFFFF;
+  color: var(--accent-blue);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.1);
+}
+
+.community-tab[hidden] {
+  display: none;
+}
+
+.community-tab-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+.community-tab-panel[hidden] {
+  display: none;
+}
+
+.panel-caption {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.detail-sidebar .leaderboard-list {
+  grid-template-columns: 1fr;
+}
+
+.detail-sidebar .leaderboard-card {
+  padding: 10px;
+}
+
+.detail-sidebar .leaderboard-entries li {
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  padding: 4px 5px;
+  font-size: 11px;
+}
+
+.detail-sidebar .comment-list {
+  height: auto;
+}
+
 .btn-close {
   position: absolute;
   top: 24px;
@@ -635,36 +788,84 @@ body {
 
 /* Modal Header Banner */
 .modal-header-banner {
-  height: 280px;
+  --banner-edge-color: #0F172A;
+  --banner-panel-color: #080D18;
   position: relative;
-  background: linear-gradient(135deg, var(--accent-indigo), var(--accent-blue));
+  background-color: #0F172A;
+  background-image: linear-gradient(135deg, var(--accent-indigo), var(--accent-blue));
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  overflow: hidden;
   display: flex;
-  align-items: flex-end;
-  padding: 36px;
+  flex-direction: column;
 }
 
-.banner-gradient {
+.banner-media {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+
+.modal-banner-backdrop,
+.modal-banner-image {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(to top, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.15) 50%, rgba(0,0,0,0) 100%);
+  pointer-events: none;
+  user-select: none;
+}
+
+.modal-banner-backdrop {
+  inset: -24px;
+  width: calc(100% + 48px);
+  height: calc(100% + 48px);
+  object-fit: cover;
+  filter: blur(22px) saturate(0.9) brightness(0.68);
+  transform: scale(1.04);
+}
+
+.modal-banner-image {
+  object-fit: contain;
+  object-position: center;
+  filter: drop-shadow(0 0 22px rgba(15, 23, 42, 0.34));
+}
+
+.modal-header-banner.is-widescreen .modal-banner-backdrop {
+  display: none;
+}
+
+.modal-header-banner.is-widescreen .modal-banner-image {
+  object-fit: cover;
+  filter: none;
 }
 
 .banner-content {
   position: relative;
   z-index: 2;
   width: 100%;
+  margin-top: -1px;
+  padding: 22px clamp(22px, 3vw, 36px) 24px;
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    var(--banner-edge-color) 0%,
+    var(--banner-edge-color) 8%,
+    var(--banner-panel-color) 72%,
+    #080D18 100%
+  );
 }
 
 .modal-title {
   font-family: var(--font-display);
-  font-size: 42px;
+  font-size: clamp(28px, 3.3vw, 42px);
   font-weight: 800;
-  margin: 12px 0;
-  color: #0F172A;
-  text-shadow: 0 2px 4px rgba(255, 255, 255, 0.8);
+  margin: 8px 0 10px;
+  color: #FFFFFF;
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.45);
 }
 
 .modal-meta-badges {
@@ -673,34 +874,121 @@ body {
   gap: 12px;
 }
 
+.hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-top: 14px;
+}
+
+.hero-play-action,
+.detail-jump-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hero-play-action .btn-launch {
+  min-width: 210px;
+  padding: 13px 22px;
+  border-radius: 14px;
+  font-size: 16px;
+}
+
+.hero-play-action .launch-status {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.66);
+  color: #DCFCE7;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.24);
+  backdrop-filter: blur(8px);
+}
+
+.hero-play-action .launch-status.update {
+  border-color: rgba(253, 224, 71, 0.48);
+  color: #FEF08A;
+}
+
+.detail-jump-button {
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.58);
+  color: #FFFFFF;
+  font-family: var(--font-main);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(8px);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.detail-jump-button:hover {
+  transform: translateY(-2px);
+  background: rgba(37, 99, 235, 0.86);
+}
+
 .meta-badge {
-  background: #FFFFFF;
-  border: 1px solid rgba(226, 232, 240, 1);
+  background: rgba(15, 23, 42, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   padding: 6px 14px;
   border-radius: 99px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-secondary);
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+  color: #F8FAFC;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(10px);
 }
 
 .version-badge {
-  color: var(--accent-blue);
-  border-color: rgba(37, 99, 235, 0.3);
-}
-
-/* Modal Body */
-.modal-body {
-  padding: 36px;
-  display: grid;
-  grid-template-columns: 3fr 2fr;
-  gap: 30px;
-  overflow-y: auto;
-  background: #FFFFFF;
+  color: #BFDBFE;
+  border-color: rgba(147, 197, 253, 0.58);
 }
 
 @media (max-width: 800px) {
-  .modal-body { grid-template-columns: 1fr; }
+  .banner-content {
+    padding: 18px 18px 20px;
+  }
+
+  .modal-title {
+    font-size: 28px;
+  }
+
+  .hero-actions { align-items: flex-start; }
+}
+
+@media (max-width: 700px) {
+  .detail-layout {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .detail-layout > .modal-header-banner {
+    order: 1;
+    min-height: 0;
+  }
+
+  .detail-sidebar {
+    flex: 0 0 auto;
+    order: 3;
+    overflow: visible;
+    border: 0;
+  }
+
+  .community-panel {
+    min-height: 540px;
+  }
+
+  .detail-summary {
+    order: 2;
+    max-height: none;
+  }
 }
 
 .glass-inset {
@@ -724,10 +1012,44 @@ body {
 }
 
 /* Game Comments */
-.comment-section {
-  grid-column: 1 / -1;
+.leaderboard-section {
+  overflow-y: auto;
   min-width: 0;
-  padding: 18px 20px;
+  padding: 16px 2px 0;
+  scroll-margin-top: 20px;
+}
+
+.leaderboard-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.leaderboard-heading-row .box-title { margin-bottom: 0; }
+.leaderboard-heading-row > span { color: var(--text-muted); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.leaderboard-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.leaderboard-card { min-width: 0; padding: 13px; border: 1px solid var(--glass-border); border-radius: 14px; background: #FFFFFF; }
+.leaderboard-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.leaderboard-card-heading h5 { margin: 0; color: var(--text-primary); font-size: 14px; }
+.leaderboard-card-heading span { color: var(--text-muted); font-size: 9px; font-weight: 800; }
+.leaderboard-entries { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.leaderboard-entries li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 7px; border-radius: 8px; color: var(--text-secondary); font-size: 12px; }
+.leaderboard-entries li:nth-child(-n+3) { background: rgba(37, 99, 235, .055); }
+.leaderboard-entries strong { color: var(--accent-blue); text-align: center; }
+.leaderboard-entries span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.leaderboard-entries b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.leaderboard-empty { margin: 18px 0; color: var(--text-muted); font-size: 12px; text-align: center; }
+
+@media (max-width: 650px) { .leaderboard-list { grid-template-columns: 1fr; } }
+
+.comment-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px 2px 0;
+  scroll-margin-top: 20px;
 }
 
 .comment-heading-row,
@@ -753,7 +1075,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: 132px;
+  flex: 1;
+  min-height: 220px;
   margin-top: 12px;
   padding-right: 4px;
   overflow-y: auto;
@@ -858,27 +1181,7 @@ body {
   opacity: 0.55;
 }
 
-/* Launch Card & Play Button (Matching pepi PlayButton & Play.png) */
-.launch-card {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.launch-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.launch-label {
-  font-size: 14px;
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-
+/* Launch status and play button */
 .launch-status {
   font-size: 14px;
   font-weight: 700;
@@ -918,13 +1221,6 @@ body {
 
 .btn-icon {
   font-size: 20px;
-}
-
-.launch-note {
-  font-size: 12px;
-  color: var(--text-muted);
-  text-align: center;
-  font-weight: 500;
 }
 
 /* Settings Modal */

@@ -32,7 +32,7 @@ pub async fn list_comments(game_id: String) -> Result<Vec<SerializedComment>, St
 {
 	let game_id = crate::env::normalize_game_id(&game_id)?;
 	let url = crate::env::get_config().server_url;
-	let mut client = crate::env::connect_and_get_client(url);
+	let mut client = crate::env::connect_and_get_client(url).await;
 	let response = client.list_comments(Request::new(CommentListRequest { game_id }))
 		.await
 		.map_err(|error| error.message().to_string())?;
@@ -48,7 +48,7 @@ pub async fn add_comment(
 {
 	let game_id = crate::env::normalize_game_id(&game_id)?;
 	let url = crate::env::get_config().server_url;
-	let mut client = crate::env::connect_and_get_client(url);
+	let mut client = crate::env::connect_and_get_client(url).await;
 	let response = client.add_comment(Request::new(AddCommentRequest {
 		game_id,
 		author,

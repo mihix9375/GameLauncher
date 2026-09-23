@@ -25,6 +25,7 @@ struct OverlayGeometry
 pub struct GameProcessState
 {
 	child: Arc<Mutex<Option<Child>>>,
+	active_game: Arc<Mutex<Option<(u32, String)>>>,
 	shutting_down: Arc<AtomicBool>,
 }
 
@@ -101,6 +102,8 @@ pub fn launch(
 		.map_err(|e| format!("起動に失敗しました ({}): {}", exe_path.display(), e))?;
 	let process_id = child.id();
 	*guard = Some(child);
+	*process_state.active_game.lock()
+		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = Some((process_id, clean_id));
 	drop(guard);
 
 	if let Err(error) = show_overlay(&app_handle) {
@@ -249,6 +252,10 @@ fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, pro
 				}
 			};
 			if finished {
+				if let Ok(mut active) = process_state.active_game.lock()
+				{
+					if active.as_ref().is_some_and(|(id, _)| *id == process_id) { *active = None; }
+				}
 				hide_overlay(&app_handle);
 				return;
 			}
@@ -404,8 +411,25 @@ fn terminate_current_game(process_state: &GameProcessState) -> Result<(), String
 		.lock()
 		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?
 		.take();
+	*process_state.active_game.lock()
+		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = None;
 	let Some(child) = child.as_mut() else { return Ok(()); };
 	terminate_process_tree(child)
+}
+
+pub fn terminate_game_if_running(app_handle: &AppHandle, game_id: &str) -> Result<(), String>
+{
+	let process_state = app_handle.state::<GameProcessState>();
+	let is_target_running = process_state.active_game.lock()
+		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?
+		.as_ref()
+		.is_some_and(|(_, active_id)| active_id == game_id);
+	if is_target_running
+	{
+		terminate_current_game(process_state.inner())?;
+		hide_overlay(app_handle);
+	}
+	Ok(())
 }
 
 #[cfg(target_os = "windows")]

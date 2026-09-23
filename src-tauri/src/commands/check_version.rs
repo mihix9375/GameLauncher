@@ -15,7 +15,7 @@ pub async fn check_version(
 	game_id: String,
 ) -> Result<SerializedVersionResponse, String> {
 	let url = crate::env::get_config().server_url;
-	let mut client = crate::env::connect_and_get_client(url);
+	let mut client = crate::env::connect_and_get_client(url).await;
 	let clean_id = crate::env::normalize_game_id(&game_id)?;
 
 	let request = Request::new(VersionRequest {

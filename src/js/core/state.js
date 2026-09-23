@@ -30,6 +30,24 @@ export function setAllGames(games) {
 	allGames = games;
 }
 
+function canonicalGameId(value) {
+	return String(value || "").trim().replace(/\.exe$/i, "").toLocaleLowerCase();
+}
+
+export function removeGameById(gameId) {
+	const targetId = canonicalGameId(gameId);
+	if (!targetId) return false;
+	const previousLength = allGames.length;
+	allGames = allGames.filter(game => {
+		const id = canonicalGameId(game.id || game.game);
+		return id !== targetId;
+	});
+	if (selectedGame && canonicalGameId(selectedGame.id || selectedGame.game) === targetId) {
+		selectedGame = null;
+	}
+	return allGames.length !== previousLength;
+}
+
 export function getSelectedGame() {
 	return selectedGame;
 }

@@ -1,14 +1,23 @@
-use std::fs;
 use std::env;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
-use tonic::transport::{Endpoint, Channel};
+
 use gamelauncher::game_service_client::GameServiceClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tonic::transport::{Channel, Endpoint};
+
+const DEFAULT_SERVER_URL: &str = "http://[::1]:50050";
+const DEFAULT_LEADERBOARD_URL: &str = "http://127.0.0.1:50052";
+
+static GRPC_CHANNEL: std::sync::OnceLock<tokio::sync::Mutex<Option<(String, Channel)>>> =
+	std::sync::OnceLock::new();
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientConfig {
 	pub server_url: String,
+	#[serde(default = "default_leaderboard_url")]
+	pub leaderboard_url: String,
 	pub games_path: String,
 	pub animations_enabled: bool,
 }
@@ -16,17 +25,30 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
 	fn default() -> Self {
 		Self {
-			server_url: "http://[::1]:50050".to_string(),
+			server_url: DEFAULT_SERVER_URL.to_string(),
+			leaderboard_url: default_leaderboard_url(),
 			games_path: "".to_string(),
 			animations_enabled: true,
 		}
 	}
 }
 
+fn default_leaderboard_url() -> String {
+	DEFAULT_LEADERBOARD_URL.to_string()
+}
+
 pub fn normalize_server_url(url: &str) -> String {
+	normalize_http_url(url, DEFAULT_SERVER_URL, 50050)
+}
+
+pub fn normalize_leaderboard_url(url: &str) -> String {
+	normalize_http_url(url, DEFAULT_LEADERBOARD_URL, 50052)
+}
+
+fn normalize_http_url(url: &str, default_url: &str, default_port: u16) -> String {
 	let u = url.trim();
 	if u.is_empty() {
-		return "http://[::1]:50050".to_string();
+		return default_url.to_string();
 	}
 	let scheme_removed = if let Some(s) = u.strip_prefix("http://") {
 		s
@@ -52,7 +74,7 @@ pub fn normalize_server_url(url: &str) -> String {
 	};
 
 	if !has_port {
-		result.push_str(":50050");
+		result.push_str(&format!(":{default_port}"));
 	}
 	result
 }
@@ -67,6 +89,7 @@ pub fn get_config() -> ClientConfig
 			if let Ok(mut cfg) = serde_json::from_str::<ClientConfig>(&content)
 			{
 				cfg.server_url = normalize_server_url(&cfg.server_url);
+				cfg.leaderboard_url = normalize_leaderboard_url(&cfg.leaderboard_url);
 				return cfg;
 			}
 		}
@@ -79,6 +102,7 @@ pub fn save_config(mut cfg: ClientConfig) -> Result<(), String>
 	let base = get_base_path()?;
 	let config_file = base.join("config.json");
 	cfg.server_url = normalize_server_url(&cfg.server_url);
+	cfg.leaderboard_url = normalize_leaderboard_url(&cfg.leaderboard_url);
 	let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
 	fs::write(&config_file, json).map_err(|e| e.to_string())?;
 	Ok(())
@@ -150,10 +174,20 @@ pub fn safe_game_relative_path(base: &Path, relative: &str) -> Result<PathBuf, S
 	Ok(base.join(path))
 }
 
-pub fn connect_and_get_client(url: String) -> GameServiceClient<Channel> 
+pub async fn connect_and_get_client(url: String) -> GameServiceClient<Channel>
 {
 	let url = normalize_server_url(&url);
-	let endpoint = match Endpoint::from_shared(url)
+	let cache = GRPC_CHANNEL.get_or_init(|| tokio::sync::Mutex::new(None));
+	let mut cached = cache.lock().await;
+	if let Some((cached_url, channel)) = cached.as_ref()
+	{
+		if cached_url == &url
+		{
+			return GameServiceClient::new(channel.clone());
+		}
+	}
+
+	let endpoint = match Endpoint::from_shared(url.clone())
 	{
 		Ok(ep) => ep,
 		Err(_) => Endpoint::from_static("http://[::1]:50050"),
@@ -164,7 +198,7 @@ pub fn connect_and_get_client(url: String) -> GameServiceClient<Channel>
 		.http2_adaptive_window(true)
 		.tcp_nodelay(true);
 	let channel = configured_endpoint.connect_lazy();
-
+	*cached = Some((url, channel.clone()));
 	GameServiceClient::new(channel)
 }
 

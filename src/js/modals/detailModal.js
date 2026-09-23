@@ -3,7 +3,7 @@ import { setSelectedGame } from "../core/state.js";
 import { openModal } from "../ui/modal.js";
 import { setLogText } from "../ui/log.js";
 import { loadComments } from "../comments/comments.js";
-import { loadLeaderboards } from "../leaderboards/leaderboards.js";
+import { loadLeaderboards, startLeaderboardAutoRefresh } from "../leaderboards/leaderboards.js";
 import { setCommunityTab } from "../ui/communityTabs.js";
 
 function updateBannerImageMode(banner, image, backdrop) {
@@ -132,6 +132,7 @@ export async function openDetailModal(game, meta) {
 
   openModal("detail-modal");
   loadLeaderboards(game);
+  startLeaderboardAutoRefresh(game);
   loadComments(game);
   setLogText(`${game.title} の詳細を開きました`);
 

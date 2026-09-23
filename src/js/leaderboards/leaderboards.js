@@ -1,6 +1,9 @@
 import { invoke } from "../core/tauri.js";
+import { setCommunityTab } from "../ui/communityTabs.js";
 
 let requestNumber = 0;
+let refreshTimer = null;
+const RefreshIntervalMilliseconds = 5000;
 
 function gameId(game) {
 	return (game.id || game.game || "").replace(/\.exe$/i, "");
@@ -44,7 +47,8 @@ function renderBoard(board) {
 	return card;
 }
 
-export async function loadLeaderboards(game) {
+export async function loadLeaderboards(game, options = {}) {
+	const reset = options.reset !== false;
 	const current = ++requestNumber;
 	const section = document.getElementById("leaderboard-section");
 	const list = document.getElementById("leaderboard-list");
@@ -53,24 +57,60 @@ export async function loadLeaderboards(game) {
 	if (!section || !list) {
 		return;
 	}
-	section.hidden = true;
-	if (jumpButton) jumpButton.hidden = true;
-	if (tabButton) tabButton.hidden = true;
-	list.replaceChildren();
+	if (reset) {
+		section.hidden = true;
+		if (jumpButton) jumpButton.hidden = true;
+		if (tabButton) tabButton.hidden = true;
+		list.replaceChildren();
+	}
 	if (!window.__TAURI__) {
 		return;
 	}
 	try {
 		const boards = await invoke("get_leaderboards", { gameId: gameId(game) });
-		if (current !== requestNumber || !Array.isArray(boards) || boards.length === 0) {
+		if (current !== requestNumber) {
 			return;
 		}
-		for (const board of boards.slice(0, 2)) {
-			list.append(renderBoard(board));
+		if (!Array.isArray(boards) || boards.length === 0) {
+			list.replaceChildren();
+			if (jumpButton) jumpButton.hidden = true;
+			if (tabButton) tabButton.hidden = true;
+			setCommunityTab("comments");
+			return;
 		}
+
+		const cards = boards.slice(0, 2).map(renderBoard);
+		list.replaceChildren(...cards);
 		if (jumpButton) jumpButton.hidden = false;
 		if (tabButton) tabButton.hidden = false;
 	} catch (error) {
 		console.warn("get_leaderboards error:", error);
 	}
 }
+
+export function startLeaderboardAutoRefresh(game) {
+	stopLeaderboardAutoRefresh();
+	refreshTimer = window.setInterval(() => {
+		const modal = document.getElementById("detail-modal");
+		if (!modal || modal.classList.contains("hidden")) {
+			stopLeaderboardAutoRefresh();
+			return;
+		}
+		if (document.visibilityState === "visible") {
+			void loadLeaderboards(game, { reset: false });
+		}
+	}, RefreshIntervalMilliseconds);
+}
+
+export function stopLeaderboardAutoRefresh() {
+	if (refreshTimer !== null) {
+		window.clearInterval(refreshTimer);
+		refreshTimer = null;
+	}
+}
+
+document.addEventListener("modal:closed", (event) => {
+	if (event.detail?.modalId === "detail-modal") {
+		stopLeaderboardAutoRefresh();
+	}
+});

@@ -11,10 +11,23 @@
 - 初回インストールと大規模更新時の完全ZIPダウンロード
 - 最大4ワーカーでのZIP並列展開
 - ゲーム別コメントの表示と投稿
-- 最大2つのランキング表示
-- Unityゲーム向けランキングAPIの提供
+- コメントと最大2つのランキングをタブで表示
+- ゲーム画像、説明、作者、バージョンをまとめた詳細画面
+- Unityゲーム向けローカルランキングAPIの提供
 - UnityのF11フルスクリーン上でも使える終了オーバーレイ
 - 多重起動の抑止と、Launcher終了時のゲーム・補助処理の終了
+
+## 全体構成
+
+```text
+Unityゲーム
+  └─ GameLauncher-Unity-Ranking
+       └─ GameLauncher :50053（ローカルHTTP API）
+            ├─ GameServer :50050（ゲーム、更新、コメント）
+            └─ GameServer :50052（ランキング）
+```
+
+UnityゲームはGameServerへ直接接続しません。ServerのIPアドレスはLauncherで一度設定し、ゲームは常に同じPCのLauncherへ接続します。
 
 ## 通信構成
 
@@ -52,6 +65,26 @@ GameServerの管理画面でゲームが削除されると、Launcher側のイ�
 
 ゲームはGameServerへ直接接続せず、起動中のLauncherが提供するローカルAPIを使用します。
 
+Unity Package Managerから専用パッケージを追加すると、HTTPやJSONを直接実装せずに利用できます。
+
+```text
+https://github.com/mihix9375/GameLauncher-Unity-Ranking.git#v0.1.0
+```
+
+```csharp
+using GameLauncher.Ranking;
+
+ScoreResult result = await RankingApi.SubmitScoreAsync(
+    "SampleGame",   // meta.jsonのid
+    "high_score",   // GameServerで設定したランキングID
+    playerName,
+    score);
+```
+
+詳しい導入方法とサンプルは [GameLauncher-Unity-Ranking](https://github.com/mihix9375/GameLauncher-Unity-Ranking) を参照してください。
+
+パッケージを使用しない場合は、次のHTTP APIを直接呼び出すこともできます。
+
 ```http
 GET http://127.0.0.1:50053/v1/games/{game_id}/leaderboards
 ```
@@ -63,7 +96,7 @@ Content-Type: application/json
 {"player_name":"PLAYER","score":12000}
 ```
 
-Unity側の実装例と応答形式はGameServerリポジトリの `UNITY_LEADERBOARD_API.md` を参照してください。Launcherを終了するとローカルAPIも終了します。
+応答形式などの低水準仕様はGameServerの [UNITY_LEADERBOARD_API.md](https://github.com/mihix9375/GameServer/blob/dev/UNITY_LEADERBOARD_API.md) を参照してください。Launcherを終了するとローカルAPIも終了します。
 
 ## 開発環境
 
@@ -111,4 +144,5 @@ cargo test
 ## 関連リポジトリ
 
 - [GameServer](https://github.com/mihix9375/GameServer)
+- [GameLauncher Ranking API for Unity](https://github.com/mihix9375/GameLauncher-Unity-Ranking)
 - [共有proto](https://github.com/mihix9375/proto)

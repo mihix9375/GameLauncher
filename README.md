@@ -68,7 +68,7 @@ GameServerの管理画面でゲームが削除されると、Launcher側のイ�
 Unity Package Managerから専用パッケージを追加すると、HTTPやJSONを直接実装せずに利用できます。
 
 ```text
-https://github.com/mihix9375/GameLauncher-Unity-Ranking.git#main
+https://github.com/mihix9375/GameLauncher-Unity-Ranking.git#v0.1.3
 ```
 
 ```csharp

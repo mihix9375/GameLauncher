@@ -68,14 +68,13 @@ GameServerの管理画面でゲームが削除されると、Launcher側のイ�
 Unity Package Managerから専用パッケージを追加すると、HTTPやJSONを直接実装せずに利用できます。
 
 ```text
-https://github.com/mihix9375/GameLauncher-Unity-Ranking.git#v0.1.0
+https://github.com/mihix9375/GameLauncher-Unity-Ranking.git#main
 ```
 
 ```csharp
 using GameLauncher.Ranking;
 
 ScoreResult result = await RankingApi.SubmitScoreAsync(
-    "SampleGame",   // meta.jsonのid
     "high_score",   // GameServerで設定したランキングID
     playerName,
     score);
@@ -97,6 +96,8 @@ Content-Type: application/json
 ```
 
 応答形式などの低水準仕様はGameServerの [UNITY_LEADERBOARD_API.md](https://github.com/mihix9375/GameServer/blob/dev/UNITY_LEADERBOARD_API.md) を参照してください。Launcherを終了するとローカルAPIも終了します。
+
+ローカルAPIの`{game_id}`は旧版との互換用です。Launcherは実際に起動中のゲームを判定し、そのゲームのIDをServerへ送ります。
 
 ## 開発環境
 

@@ -22,7 +22,8 @@ async fn main()
 	.setup(|app| {
 		commands::launch::prepare_overlay(app.handle())
 			.map_err(std::io::Error::other)?;
-		tauri::async_runtime::spawn(commands::leaderboards::serve_local_api());
+		let process_state = app.state::<commands::launch::GameProcessState>().inner().clone();
+		tauri::async_runtime::spawn(commands::leaderboards::serve_local_api(process_state));
 		Ok(())
 	})
 	.on_window_event(|window, event| {
@@ -37,6 +38,7 @@ async fn main()
 	})
 	.invoke_handler(tauri::generate_handler![
 		commands::launch::launch,
+		commands::launch::is_game_running,
 		commands::launch::close_game,
 		commands::refresh::refresh,
 		commands::check_version::check_version,

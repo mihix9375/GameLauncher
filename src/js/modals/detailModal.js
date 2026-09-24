@@ -5,33 +5,7 @@ import { setLogText } from "../ui/log.js";
 import { loadComments } from "../comments/comments.js";
 import { loadLeaderboards, startLeaderboardAutoRefresh } from "../leaderboards/leaderboards.js";
 import { setCommunityTab } from "../ui/communityTabs.js";
-
-function setupDetailScrollHint(scroller) {
-	const hint = document.getElementById("detail-scroll-hint");
-	if (!scroller || !hint) return;
-
-	const update = () => {
-		const remaining = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
-		hint.hidden = scroller.scrollHeight <= scroller.clientHeight + 4 || remaining <= 8;
-	};
-
-	if (!scroller.dataset.scrollHintReady) {
-		scroller.dataset.scrollHintReady = "true";
-		scroller.addEventListener("scroll", update, { passive: true });
-		hint.addEventListener("click", () => {
-			scroller.scrollBy({
-				top: Math.max(180, scroller.clientHeight * 0.72),
-				behavior: "smooth",
-			});
-		});
-
-		const resizeObserver = new ResizeObserver(update);
-		resizeObserver.observe(scroller);
-		scroller.querySelectorAll(".modal-header-banner, .detail-summary").forEach(element => resizeObserver.observe(element));
-	}
-
-	requestAnimationFrame(update);
-}
+import { setupScrollHint } from "../ui/scrollHint.js";
 
 function updateBannerImageMode(banner, image, backdrop) {
 	if (!image.naturalWidth || !image.naturalHeight) return;
@@ -98,7 +72,9 @@ export async function openDetailModal(game, meta) {
 	const detailMain = document.querySelector("#detail-modal .detail-main");
 	if (sidebar) sidebar.scrollTop = 0;
 	if (detailMain) detailMain.scrollTop = 0;
-	setupDetailScrollHint(detailMain);
+	setupScrollHint(detailMain, document.getElementById("detail-scroll-hint"), {
+		observedElements: [...document.querySelectorAll(".modal-header-banner, .detail-summary")],
+	});
 	setCommunityTab("comments");
 
 	const title = merged.title || game.title || "ゲームタイトル";

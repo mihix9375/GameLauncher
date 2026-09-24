@@ -40,8 +40,7 @@ impl UpdatePaths
 	fn new(games_path: &Path, game_id: &str) -> Self
 	{
 		let unique = format!(
-			"{}-{}-{}",
-			game_id,
+			"{:x}-{:x}",
 			std::process::id(),
 			std::time::SystemTime::now()
 				.duration_since(std::time::UNIX_EPOCH)
@@ -50,8 +49,8 @@ impl UpdatePaths
 		);
 		let work_dir = games_path.join(".updates").join(&unique);
 		Self {
-			archive: work_dir.join("download.zip"),
-			extracted: work_dir.join("extracted"),
+			archive: work_dir.join("d.zip"),
+			extracted: work_dir.join("x"),
 			backup: games_path.join(".updates").join(format!("{game_id}.backup")),
 			work_dir,
 		}
@@ -132,11 +131,41 @@ async fn install_full_download(
 	download_full_archive(client, request, paths).await?;
 	let archive = paths.archive.clone();
 	let extracted = paths.extracted.clone();
-	tokio::task::spawn_blocking(move || extract_archive(&archive, &extracted))
+	tokio::task::spawn_blocking(move || {
+		extract_archive(&archive, &extracted)?;
+		flatten_single_game_root(&extracted)
+	})
 		.await
 		.map_err(|error| error.to_string())??;
 	verify_manifest(&paths.extracted, manifest).await?;
 	write_installed_manifest(&paths.extracted, manifest).await
+}
+
+fn flatten_single_game_root(destination: &Path) -> Result<(), String>
+{
+	if destination.join("meta.json").is_file() { return Ok(()); }
+
+	let entries = std::fs::read_dir(destination)
+		.map_err(|error| format!("ZIPの展開先を確認できません: {error}"))?
+		.collect::<Result<Vec<_>, _>>()
+		.map_err(|error| format!("ZIPの展開先を確認できません: {error}"))?;
+	let [only] = entries.as_slice() else { return Ok(()); };
+	let wrapper = only.path();
+	if !wrapper.is_dir() || !wrapper.join("meta.json").is_file() { return Ok(()); }
+
+	let children = std::fs::read_dir(&wrapper)
+		.map_err(|error| format!("ZIP内のゲームフォルダーを確認できません: {error}"))?
+		.collect::<Result<Vec<_>, _>>()
+		.map_err(|error| format!("ZIP内のゲームフォルダーを確認できません: {error}"))?;
+	for child in children
+	{
+		let target = destination.join(child.file_name());
+		std::fs::rename(child.path(), target)
+			.map_err(|error| format!("ZIP内のゲームフォルダーを直下へ移動できません: {error}"))?;
+	}
+	std::fs::remove_dir(&wrapper)
+		.map_err(|error| format!("ZIP内の空フォルダーを削除できません: {error}"))?;
+	Ok(())
 }
 
 async fn download_full_archive(
@@ -529,6 +558,23 @@ mod tests
 		assert!(game.join("new.txt").is_file());
 		assert!(!game.join("old.txt").exists());
 		assert!(!backup.exists());
+		let _ = std::fs::remove_dir_all(root);
+	}
+
+	#[test]
+	fn flattens_single_wrapping_directory()
+	{
+		let root = test_root("flatten");
+		let wrapper = root.join("wrapped");
+		std::fs::create_dir_all(&wrapper).unwrap();
+		std::fs::write(wrapper.join("meta.json"), "{}").unwrap();
+		std::fs::write(wrapper.join("game.exe"), "game").unwrap();
+
+		flatten_single_game_root(&root).unwrap();
+
+		assert!(root.join("meta.json").is_file());
+		assert!(root.join("game.exe").is_file());
+		assert!(!wrapper.exists());
 		let _ = std::fs::remove_dir_all(root);
 	}
 

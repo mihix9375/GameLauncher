@@ -68,12 +68,16 @@ export async function openDetailModal(game, meta) {
 	setSelectedGame(game);
 	const merged = Object.assign({}, meta || {}, game);
 	const sidebar = document.querySelector("#detail-modal .detail-sidebar");
-	const summary = document.querySelector("#detail-modal .detail-summary");
+	const detailMain = document.querySelector("#detail-modal .detail-main");
 	if (sidebar) sidebar.scrollTop = 0;
-	if (summary) summary.scrollTop = 0;
+	if (detailMain) detailMain.scrollTop = 0;
 	setCommunityTab("comments");
 
-	document.getElementById("modal-title").textContent = merged.title || game.title;
+	const title = merged.title || game.title || "ゲームタイトル";
+	const titleElement = document.getElementById("modal-title");
+	titleElement.textContent = title;
+	titleElement.classList.toggle("long-title", title.length > 24);
+	titleElement.classList.toggle("very-long-title", title.length > 44);
 	document.getElementById("modal-version").textContent = merged.version || game.version || "v1.0.0";
 	document.getElementById("modal-author").textContent = merged.author || "ゲーム開発研究部";
 	document.getElementById("modal-date").textContent = merged.latest_update || merged.latestUpdate || merged.lastUpdate || "2026/07/07";

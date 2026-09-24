@@ -630,13 +630,13 @@ body {
 .detail-layout {
   display: grid;
   grid-template-columns: clamp(300px, 32%, 400px) minmax(0, 1fr);
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
   flex: 1;
   min-width: 0;
   min-height: 0;
   padding: 0;
-  overflow: visible;
+  overflow: hidden;
   background: transparent;
 }
 
@@ -652,21 +652,33 @@ body {
   background: transparent;
 }
 
-.detail-layout > .modal-header-banner {
+.detail-main {
   grid-column: 2;
   grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.detail-main > .modal-header-banner {
+  flex: 0 0 auto;
   border: 1px solid rgba(255, 255, 255, 0.7);
   border-radius: 20px;
   box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
 }
 
 .detail-summary {
-  grid-column: 2;
-  grid-row: 2;
-  max-height: 180px;
+  flex: 0 0 auto;
+  max-height: none;
   padding: 0;
-  overflow-y: auto;
+  overflow: visible;
   background: transparent;
 }
 
@@ -849,7 +861,7 @@ body {
   width: 100%;
   margin-top: -1px;
   padding: 22px clamp(22px, 3vw, 36px) 24px;
-  overflow: hidden;
+  overflow: visible;
   background: linear-gradient(
     180deg,
     var(--banner-edge-color) 0%,
@@ -866,6 +878,18 @@ body {
   margin: 8px 0 10px;
   color: #FFFFFF;
   text-shadow: 0 3px 14px rgba(0, 0, 0, 0.45);
+  overflow-wrap: anywhere;
+  line-height: 1.22;
+}
+
+.modal-title.long-title {
+  font-size: clamp(25px, 2.6vw, 34px);
+  line-height: 1.3;
+}
+
+.modal-title.very-long-title {
+  font-size: clamp(22px, 2.25vw, 30px);
+  line-height: 1.35;
 }
 
 .modal-meta-badges {
@@ -969,9 +993,12 @@ body {
     overflow-y: auto;
   }
 
-  .detail-layout > .modal-header-banner {
+  .detail-main {
+    display: flex;
+    flex: 0 0 auto;
     order: 1;
-    min-height: 0;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .detail-sidebar {
@@ -985,10 +1012,6 @@ body {
     min-height: 540px;
   }
 
-  .detail-summary {
-    order: 2;
-    max-height: none;
-  }
 }
 
 .glass-inset {

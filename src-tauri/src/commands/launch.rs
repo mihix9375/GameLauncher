@@ -29,6 +29,36 @@ pub struct GameProcessState
 	shutting_down: Arc<AtomicBool>,
 }
 
+impl GameProcessState
+{
+	pub fn active_game_id(&self) -> Result<Option<String>, String>
+	{
+		self.active_game
+			.lock()
+			.map(|active| active.as_ref().map(|(_, game_id)| game_id.clone()))
+			.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())
+	}
+}
+
+#[tauri::command]
+pub fn is_game_running(process_state: State<'_, GameProcessState>) -> Result<bool, String>
+{
+	let mut child = process_state.child.lock()
+		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?;
+	let Some(process) = child.as_mut() else { return Ok(false); };
+	match process.try_wait()
+	{
+		Ok(None) => Ok(true),
+		Ok(Some(_)) => {
+			*child = None;
+			*process_state.active_game.lock()
+				.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = None;
+			Ok(false)
+		}
+		Err(error) => Err(format!("ゲームプロセスの確認に失敗しました: {error}")),
+	}
+}
+
 #[tauri::command]
 pub fn launch(
 	app_handle: AppHandle,
@@ -92,6 +122,8 @@ pub fn launch(
 
 	let mut command = Command::new(&exe_path);
 	command.current_dir(&game_dir);
+	// ランキングAPI側でmeta.jsonのIDを手入力せず取得できるよう、子プロセスへ渡す。
+	command.env("GAMELAUNCHER_GAME_ID", &clean_id);
 	if is_unity_game(&exe_path, &game_dir) {
 		// UnityのF11切り替えを排他的フルスクリーンではなく、
 		// 外部オーバーレイを表示できるボーダーレス方式に固定する。

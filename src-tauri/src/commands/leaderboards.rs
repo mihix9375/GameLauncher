@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -63,6 +63,12 @@ struct ProxyError
 struct ServerError
 {
 	message: String,
+}
+
+fn launched_game_id(process_state: &crate::commands::launch::GameProcessState) -> Result<String, String>
+{
+	process_state.active_game_id()?
+		.ok_or_else(|| "GameLauncherから起動中のゲームがありません".to_string())
 }
 
 fn server_client() -> Result<Client, String>
@@ -168,27 +174,34 @@ fn proxy_error(message: String) -> (StatusCode, Json<ProxyError>)
 	(StatusCode::BAD_GATEWAY, Json(ProxyError { ok: false, message }))
 }
 
-async fn proxy_list(Path(game_id): Path<String>) -> ProxyResult<LeaderboardListResponse>
+async fn proxy_list(
+	State(process_state): State<crate::commands::launch::GameProcessState>,
+	Path(_requested_game_id): Path<String>,
+) -> ProxyResult<LeaderboardListResponse>
 {
+	let game_id = launched_game_id(&process_state).map_err(proxy_error)?;
 	Ok(Json(fetch_from_server(&game_id).await.map_err(proxy_error)?))
 }
 
 async fn proxy_submit(
-	Path((game_id, board_id)): Path<(String, String)>,
+	State(process_state): State<crate::commands::launch::GameProcessState>,
+	Path((_requested_game_id, board_id)): Path<(String, String)>,
 	Json(submission): Json<ScoreSubmission>,
 ) -> ProxyResult<ScoreSubmissionResponse>
 {
+	let game_id = launched_game_id(&process_state).map_err(proxy_error)?;
 	let result = submit_to_server(&game_id, &board_id, submission)
 		.await
 		.map_err(proxy_error)?;
 	Ok(Json(result))
 }
 
-pub async fn serve_local_api()
+pub async fn serve_local_api(process_state: crate::commands::launch::GameProcessState)
 {
 	let app = Router::new()
 		.route(LIST_ROUTE, get(proxy_list))
-		.route(SUBMIT_ROUTE, post(proxy_submit));
+		.route(SUBMIT_ROUTE, post(proxy_submit))
+		.with_state(process_state);
 	let listener = match tokio::net::TcpListener::bind(LOCAL_API_BIND).await
 	{
 		Ok(listener) => listener,

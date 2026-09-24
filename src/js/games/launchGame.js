@@ -6,8 +6,23 @@ import { renderGames } from "./renderGames.js";
 import { updateGameCount } from "../ui/counter.js";
 import { closeModal } from "../ui/modal.js";
 
+let launchRequestInProgress = false;
+
 export async function launchGame(game) {
+	if (launchRequestInProgress) {
+		setLogText("別のゲームを起動処理中です");
+		return;
+	}
+	launchRequestInProgress = true;
+
 	try {
+		if (window.__TAURI__ && await invoke("is_game_running")) {
+			const message = "別のゲームが既に起動しています。終了してから起動してください。";
+			setLogText(message);
+			alert(message);
+			return;
+		}
+
 		setLogText(`${game.title} を起動中...`);
 		const launchBtn = document.getElementById("btn-launch-game");
 		const originalText = launchBtn?.innerHTML || "";
@@ -91,5 +106,7 @@ export async function launchGame(game) {
 			launchBtn.style.opacity = "1";
 			launchBtn.style.pointerEvents = "auto";
 		}
+	} finally {
+		launchRequestInProgress = false;
 	}
 }

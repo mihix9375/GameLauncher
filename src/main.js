@@ -2,10 +2,12 @@ import { initClock } from "./js/ui/clock.js";
 import { setupEventListeners } from "./js/events/setupEventListeners.js";
 import { loadGames } from "./js/games/loadGames.js";
 import { setupScrollHint } from "./js/ui/scrollHint.js";
+import { setupFullscreenToggle } from "./js/ui/fullscreen.js";
 
 document.addEventListener("DOMContentLoaded", () => {
 	initClock();
 	setupEventListeners();
+	setupFullscreenToggle();
 	setupScrollHint(
 		document.getElementById("main-scroll"),
 		document.getElementById("game-list-scroll-hint"),

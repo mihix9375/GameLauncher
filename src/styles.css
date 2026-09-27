@@ -547,7 +547,7 @@ body {
   box-shadow: 0 15px 35px rgba(37, 99, 235, 0.3);
 }
 
-.update-btn:hover {
+.fab-btn.update-btn:hover {
   transform: scale(1.15) rotate(180deg);
 }
 

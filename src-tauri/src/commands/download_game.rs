@@ -11,6 +11,10 @@ use super::game_archive::extract_archive;
 
 pub(crate) static GAME_STORAGE_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
 const MANIFEST_FILE: &str = ".gamelauncher-manifest.json";
+const DISK_WRITE_BUFFER_SIZE: usize = 8 * 1024 * 1024;
+const FULL_ARCHIVE_WRITE_QUEUE_DEPTH: usize = 24;
+const FILE_WRITE_QUEUE_DEPTH: usize = 4;
+const PARALLEL_FILE_STREAMS: usize = 4;
 
 struct UpdatePaths
 {
@@ -176,31 +180,43 @@ async fn download_full_archive(
 {
 	let response = client.download_game(Request::new(request)).await.map_err(|e| e.to_string())?;
 	let mut stream = response.into_inner();
-
-	let file = tokio::fs::OpenOptions::new()
-		.create_new(true)
-		.write(true)
-		.open(&paths.archive)
-		.await
-		.map_err(|e| e.to_string())?;
-	let mut writer = tokio::io::BufWriter::with_capacity(1024 * 1024 * 8, file);
-	let mut expected_index = 0;
-	let mut received_data = false;
-	while let Some(chunk) = stream.message().await.map_err(|e| e.to_string())?
-	{
-		if chunk.index != expected_index {
-			return Err("ダウンロードデータの順序が不正です".to_string());
+	let archive_path = paths.archive.clone();
+	let (disk_sender, mut disk_receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(FULL_ARCHIVE_WRITE_QUEUE_DEPTH);
+	let writer_task = tokio::spawn(async move {
+		let file = tokio::fs::OpenOptions::new()
+			.create_new(true)
+			.write(true)
+			.open(archive_path)
+			.await
+			.map_err(|error| error.to_string())?;
+		// Four 2 MiB network chunks are joined into one 8 MiB buffered disk write.
+		let mut writer = tokio::io::BufWriter::with_capacity(DISK_WRITE_BUFFER_SIZE, file);
+		while let Some(data) = disk_receiver.recv().await
+		{
+			writer.write_all(&data).await.map_err(|error| error.to_string())?;
 		}
-		expected_index += 1;
-		received_data = true;
-		writer.write_all(&chunk.data).await.map_err(|e| e.to_string())?;
-	}
-	if !received_data {
-		return Err("ダウンロードデータが空です".to_string());
-	}
-	writer.flush().await.map_err(|e| e.to_string())?;
-	drop(writer);
-	Ok(())
+		writer.flush().await.map_err(|error| error.to_string())
+	});
+
+	let receive_result = async {
+		let mut expected_index = 0;
+		let mut received_data = false;
+		while let Some(chunk) = stream.message().await.map_err(|error| error.to_string())?
+		{
+			if chunk.index != expected_index
+			{
+				return Err("ダウンロードデータの順序が不正です".to_string());
+			}
+			expected_index += 1;
+			received_data = true;
+			disk_sender.send(chunk.data).await.map_err(|_| "ダウンロードデータを書き込めません".to_string())?;
+		}
+		if received_data { Ok(()) } else { Err("ダウンロードデータが空です".to_string()) }
+	}.await;
+	drop(disk_sender);
+	let write_result = writer_task.await.map_err(|error| error.to_string())?;
+	write_result?;
+	receive_result
 }
 
 async fn install_differential_update(
@@ -221,8 +237,7 @@ async fn install_differential_update(
 			version: version.to_string(),
 		}, paths, manifest).await;
 	}
-	let changed_paths = changed_files.iter().map(|file| file.path.clone()).collect::<Vec<_>>();
-	let changed_set = changed_paths.iter().cloned().collect::<HashSet<_>>();
+	let changed_set = changed_files.iter().map(|file| file.path.clone()).collect::<HashSet<_>>();
 
 	let source = game_path.to_path_buf();
 	let staging = paths.extracted.clone();
@@ -231,14 +246,29 @@ async fn install_differential_update(
 		.await
 		.map_err(|error| error.to_string())??;
 
-	if !changed_paths.is_empty()
+	if !changed_files.is_empty()
 	{
-		let response = client.download_game_files(Request::new(GameFilesRequest {
-			game_id: game_id.to_string(),
-			version: version.to_string(),
-			paths: changed_paths,
-		})).await.map_err(|error| error.message().to_string())?;
-		write_file_stream(response.into_inner(), &paths.extracted, &changed_files).await?;
+		let groups = parallel_file_groups(&changed_files, PARALLEL_FILE_STREAMS);
+		let mut tasks = Vec::with_capacity(groups.len());
+		for files in groups
+		{
+			let mut stream_client = client.clone();
+			let request_game_id = game_id.to_string();
+			let request_version = version.to_string();
+			let staging = paths.extracted.clone();
+			tasks.push(tokio::spawn(async move {
+				let response = stream_client.download_game_files(Request::new(GameFilesRequest {
+					game_id: request_game_id,
+					version: request_version,
+					paths: files.iter().map(|file| file.path.clone()).collect(),
+				})).await.map_err(|error| error.message().to_string())?;
+				write_file_stream(response.into_inner(), &staging, &files).await
+			}));
+		}
+		for task in tasks
+		{
+			task.await.map_err(|error| error.to_string())??;
+		}
 		verify_files(&paths.extracted, &changed_files).await?;
 	}
 
@@ -356,19 +386,53 @@ async fn write_file_stream(
 	files: &[GameFile],
 ) -> Result<(), String>
 {
-	let mut writer = FileStreamWriter::new(staging, files);
-	while let Some(chunk) = stream.message().await.map_err(|error| error.to_string())?
+	let staging = staging.to_path_buf();
+	let files = files.to_vec();
+	let (disk_sender, mut disk_receiver) = tokio::sync::mpsc::channel::<crate::env::gamelauncher::GameFileData>(FILE_WRITE_QUEUE_DEPTH);
+	let writer_task = tokio::spawn(async move {
+		let mut writer = FileStreamWriter::new(&staging, &files);
+		while let Some(chunk) = disk_receiver.recv().await
+		{
+			writer.accept(chunk).await?;
+		}
+		writer.finish()
+	});
+
+	let receive_result = async {
+		while let Some(chunk) = stream.message().await.map_err(|error| error.to_string())?
+		{
+			disk_sender.send(chunk).await.map_err(|_| "差分データを書き込めません".to_string())?;
+		}
+		Ok(())
+	}.await;
+	drop(disk_sender);
+	let write_result = writer_task.await.map_err(|error| error.to_string())?;
+	write_result?;
+	receive_result
+}
+
+fn parallel_file_groups(files: &[GameFile], maximum_groups: usize) -> Vec<Vec<GameFile>>
+{
+	let group_count = maximum_groups.max(1).min(files.len());
+	if group_count == 0 { return Vec::new(); }
+	let mut sorted = files.to_vec();
+	sorted.sort_by(|left, right| right.size.cmp(&left.size));
+	let mut groups = vec![Vec::new(); group_count];
+	let mut sizes = vec![0u64; group_count];
+	for file in sorted
 	{
-		writer.accept(chunk).await?;
+		let index = sizes.iter().enumerate().min_by_key(|(_, size)| **size).map(|(index, _)| index).unwrap_or(0);
+		sizes[index] = sizes[index].saturating_add(file.size);
+		groups[index].push(file);
 	}
-	writer.finish()
+	groups
 }
 
 struct FileStreamWriter
 {
 	staging: PathBuf,
 	expected_sizes: HashMap<String, u64>,
-	current: Option<(String, tokio::fs::File, u64)>,
+	current: Option<(String, tokio::io::BufWriter<tokio::fs::File>, u64)>,
 }
 
 impl FileStreamWriter
@@ -415,7 +479,8 @@ impl FileStreamWriter
 		if offset != 0 { return Err(format!("ファイルの開始位置が不正です: {path}")); }
 		let destination = crate::env::safe_game_relative_path(&self.staging, path)?;
 		let file = tokio::fs::File::create(destination).await.map_err(|error| error.to_string())?;
-		self.current = Some((path.to_string(), file, 0));
+		let writer = tokio::io::BufWriter::with_capacity(DISK_WRITE_BUFFER_SIZE, file);
+		self.current = Some((path.to_string(), writer, 0));
 		Ok(())
 	}
 
@@ -576,6 +641,21 @@ mod tests
 		assert!(root.join("game.exe").is_file());
 		assert!(!wrapper.exists());
 		let _ = std::fs::remove_dir_all(root);
+	}
+
+	#[test]
+	fn balances_changed_files_across_parallel_http2_streams()
+	{
+		let files = [9, 8, 7, 6, 5, 4].into_iter().enumerate().map(|(index, size)| GameFile {
+			path: format!("file-{index}"),
+			size,
+			sha256: String::new(),
+		}).collect::<Vec<_>>();
+		let groups = parallel_file_groups(&files, 4);
+
+		assert_eq!(groups.len(), 4);
+		assert_eq!(groups.iter().map(Vec::len).sum::<usize>(), files.len());
+		assert!(groups.iter().all(|group| !group.is_empty()));
 	}
 
 	#[tokio::test]

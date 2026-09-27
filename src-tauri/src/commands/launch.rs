@@ -27,6 +27,7 @@ pub struct GameProcessState
 	child: Arc<Mutex<Option<Child>>>,
 	active_game: Arc<Mutex<Option<(u32, String)>>>,
 	shutting_down: Arc<AtomicBool>,
+	confirming_close: Arc<AtomicBool>,
 }
 
 impl GameProcessState
@@ -136,6 +137,7 @@ pub fn launch(
 	*guard = Some(child);
 	*process_state.active_game.lock()
 		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = Some((process_id, clean_id));
+	process_state.confirming_close.store(false, Ordering::SeqCst);
 	drop(guard);
 
 	if let Err(error) = show_overlay(&app_handle) {
@@ -153,9 +155,27 @@ pub fn close_game(
 	process_state: State<'_, GameProcessState>,
 ) -> Result<(), String>
 {
+	process_state.confirming_close.store(false, Ordering::SeqCst);
 	let result = terminate_current_game(process_state.inner());
 	hide_overlay(&app_handle);
 	result
+}
+
+#[tauri::command]
+pub fn cancel_close_game(
+	app_handle: AppHandle,
+	process_state: State<'_, GameProcessState>,
+) -> Result<(), String>
+{
+	process_state.confirming_close.store(false, Ordering::SeqCst);
+	let overlay = app_handle
+		.get_webview_window("game-overlay")
+		.ok_or_else(|| "ゲーム終了オーバーレイが見つかりません".to_string())?;
+	overlay.eval("window.hideCloseConfirmation?.()")
+		.map_err(|error| error.to_string())?;
+	overlay.set_ignore_cursor_events(true).map_err(|error| error.to_string())?;
+	force_overlay_to_front(&app_handle)?;
+	show_prepared_overlay(&app_handle)
 }
 
 pub fn begin_shutdown(app_handle: AppHandle)
@@ -235,7 +255,7 @@ fn overlay_geometry(app_handle: &AppHandle) -> Result<OverlayGeometry, String>
 fn hide_overlay(app_handle: &AppHandle)
 {
 	if let Some(overlay) = app_handle.get_webview_window("game-overlay") {
-		let _ = overlay.eval("document.getElementById('close-game')?.classList.remove('is-hovered', 'is-pressed')");
+		let _ = overlay.eval("window.hideCloseConfirmation?.(); document.getElementById('close-game')?.classList.remove('is-hovered', 'is-pressed')");
 		let _ = overlay.set_ignore_cursor_events(true);
 		if let Ok(hwnd) = overlay.hwnd() {
 			use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
@@ -248,7 +268,7 @@ fn hide_overlay(app_handle: &AppHandle)
 fn hide_overlay(app_handle: &AppHandle)
 {
 	if let Some(overlay) = app_handle.get_webview_window("game-overlay") {
-		let _ = overlay.eval("document.getElementById('close-game')?.classList.remove('is-hovered', 'is-pressed')");
+		let _ = overlay.eval("window.hideCloseConfirmation?.(); document.getElementById('close-game')?.classList.remove('is-hovered', 'is-pressed')");
 		let _ = overlay.set_ignore_cursor_events(true);
 		let _ = overlay.hide();
 	}
@@ -284,6 +304,7 @@ fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, pro
 				}
 			};
 			if finished {
+				process_state.confirming_close.store(false, Ordering::SeqCst);
 				if let Ok(mut active) = process_state.active_game.lock()
 				{
 					if active.as_ref().is_some_and(|(id, _)| *id == process_id) { *active = None; }
@@ -306,6 +327,10 @@ fn monitor_overlay_input(app_handle: AppHandle, process_state: GameProcessState,
 		loop {
 			tokio::time::sleep(std::time::Duration::from_millis(16)).await;
 			if process_state.shutting_down.load(Ordering::SeqCst) { return; }
+			if process_state.confirming_close.load(Ordering::SeqCst) {
+				was_pressed = left_mouse_button_pressed();
+				continue;
+			}
 			let running = process_state
 				.child
 				.lock()
@@ -332,13 +357,36 @@ fn monitor_overlay_input(app_handle: AppHandle, process_state: GameProcessState,
 				was_visually_pressed = visually_pressed;
 			}
 			if pressed && !was_pressed && hovered {
-				let _ = terminate_current_game(&process_state);
-				hide_overlay(&app_handle);
-				return;
+				let _ = overlay.eval(
+					"document.getElementById('close-game')?.classList.remove('is-pressed')"
+				);
+				process_state.confirming_close.store(true, Ordering::SeqCst);
+				if let Err(error) = show_close_confirmation(&app_handle) {
+					process_state.confirming_close.store(false, Ordering::SeqCst);
+					let _ = overlay.eval("window.hideCloseConfirmation?.()");
+					let _ = overlay.set_ignore_cursor_events(true);
+					eprintln!("ゲーム終了確認を表示できません: {error}");
+				}
+				was_visually_pressed = false;
+				continue;
 			}
 			was_pressed = pressed;
 		}
 	});
+}
+
+#[cfg(target_os = "windows")]
+fn show_close_confirmation(app_handle: &AppHandle) -> Result<(), String>
+{
+	let overlay = app_handle
+		.get_webview_window("game-overlay")
+		.ok_or_else(|| "ゲーム終了オーバーレイが見つかりません".to_string())?;
+	overlay.eval("window.showCloseConfirmation?.()")
+		.map_err(|error| error.to_string())?;
+	overlay.set_ignore_cursor_events(false).map_err(|error| error.to_string())?;
+	force_overlay_to_front(app_handle)?;
+	show_prepared_overlay(app_handle)?;
+	overlay.set_focus().map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

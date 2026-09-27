@@ -128,14 +128,6 @@ body.is-confirming .confirmation-card {
   box-shadow: 0 12px 28px rgba(239, 68, 68, 0.28);
 }
 
-.confirmation-label {
-  margin: 0 0 8px;
-  color: #6366f1;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.18em;
-}
-
 .confirmation-card h1 {
   margin: 0;
   font-size: clamp(25px, 3vw, 32px);

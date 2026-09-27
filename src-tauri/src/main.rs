@@ -40,6 +40,7 @@ async fn main()
 		commands::launch::launch,
 		commands::launch::is_game_running,
 		commands::launch::close_game,
+		commands::launch::cancel_close_game,
 		commands::refresh::refresh,
 		commands::check_version::check_version,
 		commands::download_game::download_game,

@@ -53,6 +53,10 @@ pub fn refresh() -> Vec<Meta>
 									};
 									let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
 									meta.title_image = format!("data:{};base64,{}", mime, encoded);
+								} else {
+									// Avoid rendering a broken relative URL when metadata references
+									// a thumbnail that was not included in the distributed ZIP.
+									meta.title_image.clear();
 								}
 							}
 							metas.push(meta);

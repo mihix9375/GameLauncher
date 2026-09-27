@@ -193,9 +193,9 @@ pub async fn connect_and_get_client(url: String) -> GameServiceClient<Channel>
 		Err(_) => Endpoint::from_static("http://[::1]:50050"),
 	};
 	let configured_endpoint = endpoint
-		.initial_stream_window_size(Some(1024 * 1024 * 16))
-		.initial_connection_window_size(Some(1024 * 1024 * 32))
-		.http2_adaptive_window(true)
+		.initial_stream_window_size(Some(1024 * 1024 * 64))
+		.initial_connection_window_size(Some(1024 * 1024 * 256))
+		.http2_adaptive_window(false)
 		.tcp_nodelay(true);
 	let channel = configured_endpoint.connect_lazy();
 	*cached = Some((url, channel.clone()));
@@ -215,6 +215,72 @@ where
 	Ok(opt.unwrap_or_default())
 }
 
+fn date_to_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	let value = Option::<Value>::deserialize(deserializer)?;
+	let text = match value
+	{
+		Some(Value::String(value)) => value,
+		Some(Value::Number(value)) => value.to_string(),
+		Some(Value::Bool(value)) => value.to_string(),
+		_ => String::new(),
+	};
+	Ok(normalize_meta_date(&text))
+}
+
+/// Accepts common date spellings used by game authors and returns one display format.
+/// Unknown or invalid values are kept as-is instead of being discarded.
+pub fn normalize_meta_date(value: &str) -> String
+{
+	let original = value.trim();
+	if original.is_empty()
+	{
+		return String::new();
+	}
+
+	let date_part = original.split(['T', ' ']).next().unwrap_or(original);
+	let normalized = date_part
+		.replace('年', "/")
+		.replace('月', "/")
+		.replace('日', "")
+		.replace(['-', '.'], "/");
+	let parts: Vec<&str> = normalized.split('/').filter(|part| !part.is_empty()).collect();
+	let parsed = if parts.len() == 3
+	{
+		Some((parts[0], parts[1], parts[2]))
+	}
+	else if normalized.len() == 8 && normalized.bytes().all(|byte| byte.is_ascii_digit())
+	{
+		Some((&normalized[0..4], &normalized[4..6], &normalized[6..8]))
+	}
+	else
+	{
+		None
+	};
+
+	let Some((year, month, day)) = parsed else { return original.to_string(); };
+	let (Ok(year), Ok(month), Ok(day)) = (year.parse::<u32>(), month.parse::<u32>(), day.parse::<u32>()) else
+	{
+		return original.to_string();
+	};
+	let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+	let max_day = match month
+	{
+		1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+		4 | 6 | 9 | 11 => 30,
+		2 if leap_year => 29,
+		2 => 28,
+		_ => return original.to_string(),
+	};
+	if !(1..=max_day).contains(&day)
+	{
+		return original.to_string();
+	}
+	format!("{year:04}/{month:02}/{day:02}")
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Meta
 {
@@ -232,7 +298,7 @@ pub struct Meta
 	pub game: String,
 	#[serde(default, deserialize_with = "null_to_default")]
 	pub version: String,
-	#[serde(rename = "latestUpdate", alias = "lastUpdate", alias = "latest_update", default, deserialize_with = "null_to_default")]
+	#[serde(rename = "latestUpdate", alias = "lastUpdate", alias = "latest_update", default, deserialize_with = "date_to_string")]
 	pub latest_update: String,
 	#[serde(default, deserialize_with = "null_to_default")]
 	pub description: String,
@@ -246,6 +312,22 @@ pub struct Meta
 mod tests
 {
 	use super::*;
+
+	#[test]
+	fn normalizes_common_meta_date_spellings()
+	{
+		for value in ["2026/9/6", "2026-09-06", "2026.9.6", "2026年9月6日", "20260906", "2026-09-06T12:34:56Z"]
+		{
+			assert_eq!(normalize_meta_date(value), "2026/09/06");
+		}
+	}
+
+	#[test]
+	fn preserves_unknown_or_invalid_meta_dates()
+	{
+		assert_eq!(normalize_meta_date("秋ごろ"), "秋ごろ");
+		assert_eq!(normalize_meta_date("2026-02-30"), "2026-02-30");
+	}
 
 	#[test]
 	fn game_id_accepts_a_single_file_name()

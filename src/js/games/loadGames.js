@@ -1,10 +1,61 @@
 import { invoke } from "../core/tauri.js";
-import { setAllGames } from "../core/state.js";
+import { findGameById, getAllGames, setAllGames } from "../core/state.js";
 import { renderGames } from "./renderGames.js";
 import { updateGameCount } from "../ui/counter.js";
 import { setLogText } from "../ui/log.js";
 
 let latestLoadRequest = 0;
+
+function canonicalGameId(game) {
+	return String(game?.id || game?.game || "").replace(/\.exe$/i, "").toLocaleLowerCase();
+}
+
+function normalizeGame(game) {
+	if (game.id && game.id.endsWith(".exe")) game.id = game.id.replace(/\.exe$/i, "");
+	if (!game.id && game.game) game.id = game.game.replace(/\.exe$/i, "");
+	if (!game.game && game.id) game.game = `${game.id}.exe`;
+	if (!game.image && game.titleImage) game.image = game.titleImage;
+	if (!game.titleImage && game.image) game.titleImage = game.image;
+	if (game.isInstalled === undefined) game.isInstalled = true;
+	if (game.hasUpdate === undefined) game.hasUpdate = false;
+	return game;
+}
+
+function sortGames(games) {
+	return games.sort((left, right) => {
+		const titleOrder = String(left.title || left.id || "").localeCompare(
+			String(right.title || right.id || ""),
+			"ja",
+			{ numeric: true, sensitivity: "base" },
+		);
+		return titleOrder || canonicalGameId(left).localeCompare(canonicalGameId(right));
+	});
+}
+
+export async function refreshGameCard(gameId) {
+	if (!window.__TAURI__) return findGameById(gameId);
+	const refreshedGames = (await invoke("refresh")).map(normalizeGame);
+	const freshGame = refreshedGames.find(game => canonicalGameId(game) === canonicalGameId({ id: gameId }));
+	if (!freshGame) return null;
+
+	const existing = findGameById(gameId);
+	if (existing) {
+		Object.assign(existing, freshGame, {
+			isInstalled: true,
+			hasUpdate: false,
+			_needsUpdate: false,
+		});
+		delete existing._latestVersion;
+		delete existing._downloadError;
+	} else {
+		getAllGames().push(freshGame);
+	}
+
+	sortGames(getAllGames());
+	renderGames(getAllGames());
+	updateGameCount(getAllGames().length);
+	return existing || freshGame;
+}
 
 export async function loadGames() {
 	const requestNumber = ++latestLoadRequest;
@@ -26,16 +77,16 @@ export async function loadGames() {
 		}
 		if (requestNumber !== latestLoadRequest) return;
 
-		allGames.forEach(g => {
-			if (g.id && g.id.endsWith(".exe")) g.id = g.id.replace(".exe", "");
-			if (!g.id && g.game) g.id = g.game.replace(".exe", "");
-			if (!g.game && g.id) g.game = `${g.id}.exe`;
-			if (!g.image && g.titleImage) g.image = g.titleImage;
-			if (!g.titleImage && g.image) g.titleImage = g.image;
-			if (g.isInstalled === undefined) g.isInstalled = true;
-			if (g.hasUpdate === undefined) g.hasUpdate = false;
-		});
+		allGames.forEach(normalizeGame);
 
+		// refreshはローカルゲームだけを返すため、Serverから通知された未導入カードを維持する。
+		const localIds = new Set(allGames.map(game => String(game.id || game.game || "").replace(/\.exe$/i, "").toLocaleLowerCase()));
+		for (const remoteGame of getAllGames().filter(game => game.isInstalled === false)) {
+			const remoteId = String(remoteGame.id || remoteGame.game || "").replace(/\.exe$/i, "").toLocaleLowerCase();
+			if (remoteId && !localIds.has(remoteId)) allGames.push(remoteGame);
+		}
+
+		sortGames(allGames);
 		setAllGames(allGames);
 		renderGames(allGames);
 		updateGameCount(allGames.length);

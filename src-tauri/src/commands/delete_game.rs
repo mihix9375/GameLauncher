@@ -5,10 +5,8 @@ use tauri::AppHandle;
 pub async fn apply_server_deletion(app_handle: &AppHandle, game_id: &str) -> Result<bool, String>
 {
 	let clean_id = crate::env::normalize_game_id(game_id)?;
-	let _storage_guard = super::download_game::GAME_STORAGE_LOCK
-		.get_or_init(|| tokio::sync::Mutex::new(()))
-		.lock()
-		.await;
+	let storage_lock = super::download_game::game_storage_lock(&clean_id).await;
+	let _storage_guard = storage_lock.lock().await;
 	let games_path = crate::env::get_games_path()?;
 	let game_path = games_path.join(&clean_id);
 	if !game_path.exists() { return Ok(false); }

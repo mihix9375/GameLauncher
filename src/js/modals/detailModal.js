@@ -1,5 +1,5 @@
 import { invoke } from "../core/tauri.js";
-import { setSelectedGame } from "../core/state.js";
+import { getSelectedGame, setSelectedGame } from "../core/state.js";
 import { openModal } from "../ui/modal.js";
 import { setLogText } from "../ui/log.js";
 import { loadComments } from "../comments/comments.js";
@@ -65,6 +65,78 @@ function updateBannerPalette(banner, image) {
 	}
 }
 
+function canonicalGameId(game) {
+	return String(game?.id || game?.game || "").trim().replace(/\.exe$/i, "").toLocaleLowerCase();
+}
+
+export function updateDetailDownloadUi(game) {
+	if (!game || canonicalGameId(getSelectedGame()) !== canonicalGameId(game)) return;
+	const button = document.getElementById("btn-launch-game");
+	const status = document.querySelector("#detail-modal .launch-status");
+	const progressWrap = document.getElementById("detail-download-progress");
+	const progressBar = document.getElementById("detail-download-progress-bar");
+	const progressLabel = document.getElementById("detail-download-progress-label");
+	const progress = game._downloadProgress;
+	const downloading = Boolean(game._isDownloading && progress);
+
+	if (downloading) {
+		const measured = progress.total_bytes > 0;
+		const percentage = measured
+			? Math.min(100, Math.round((progress.received_bytes / progress.total_bytes) * 100))
+			: 0;
+		const label = progress.stage === "queued" ? "ダウンロード待機中"
+			: progress.stage === "preparing" ? "準備中"
+			: progress.stage === "extracting" ? "展開中"
+			: progress.stage === "installing" ? "適用中"
+			: `${percentage}% ダウンロード中`;
+		if (button) {
+			button.disabled = true;
+			button.innerHTML = `<span class="btn-icon">⏳</span><span class="btn-text">${label}</span>`;
+			button.style.opacity = "0.7";
+			button.style.pointerEvents = "none";
+		}
+		if (status) {
+			status.textContent = "ダウンロード中";
+			status.className = "launch-status update";
+		}
+		if (progressWrap) {
+			progressWrap.hidden = false;
+			progressWrap.classList.toggle("indeterminate", !measured);
+			if (measured) progressWrap.setAttribute("aria-valuenow", String(percentage));
+			else progressWrap.removeAttribute("aria-valuenow");
+		}
+		if (progressBar) progressBar.style.width = `${percentage}%`;
+		if (progressLabel) progressLabel.textContent = label;
+		return;
+	}
+
+	if (progressWrap) progressWrap.hidden = true;
+	if (button) {
+		button.disabled = false;
+		button.style.opacity = "1";
+		button.style.pointerEvents = "auto";
+	}
+	if (game.isInstalled === false) {
+		if (button) button.innerHTML = `<span class="btn-icon">⬇</span><span class="btn-text">ダウンロードする (Download)</span>`;
+		if (status) {
+			status.textContent = game._downloadError ? "ダウンロード失敗" : "未ダウンロード";
+			status.className = "launch-status update";
+		}
+	} else if (game.hasUpdate || game._needsUpdate) {
+		if (button) button.innerHTML = `<span class="btn-icon">🔄</span><span class="btn-text">更新する (Update)</span>`;
+		if (status) {
+			status.textContent = game._downloadError ? "更新失敗" : `更新可能${game._latestVersion ? ` (v${game._latestVersion})` : ""}`;
+			status.className = "launch-status update";
+		}
+	} else {
+		if (button) button.innerHTML = `<span class="btn-icon">▶</span><span class="btn-text">起動する (Play)</span>`;
+		if (status) {
+			status.textContent = "起動可能 (最新)";
+			status.className = "launch-status ready";
+		}
+	}
+}
+
 export async function openDetailModal(game, meta) {
 	setSelectedGame(game);
 	const merged = Object.assign({}, meta || {}, game);
@@ -86,6 +158,7 @@ export async function openDetailModal(game, meta) {
 	document.getElementById("modal-author").textContent = merged.author || "ゲーム開発研究部";
 	document.getElementById("modal-date").textContent = merged.latest_update || merged.latestUpdate || merged.lastUpdate || "2026/07/07";
 	document.getElementById("modal-description").textContent = merged.description || "説明文はありません。";
+	updateDetailDownloadUi(game);
 
 	const bannerEl = document.getElementById("modal-banner");
 	const bannerImage = document.getElementById("modal-banner-image");
@@ -148,36 +221,19 @@ export async function openDetailModal(game, meta) {
 		try {
 			setLogText(`${game.title} の更新をチェック中...`);
 			const res = await invoke("check_version", { version: game.version || "0.0.0", gameId: (game.id || game.game || "").replace(".exe", "") });
-			if (res && res.is_update_available) {
+			const needsInitialDownload = game.isInstalled === false;
+			if (needsInitialDownload || (res && res.is_update_available)) {
 				game._needsUpdate = true;
-				game._latestVersion = res.latest_version;
-				setLogText(`${game.title} に新しいバージョン (${res.latest_version}) があります`);
-				const statusEl = document.querySelector(".launch-status");
-				if (statusEl) {
-					statusEl.textContent = `更新可能 (v${res.latest_version})`;
-					statusEl.className = "launch-status update";
-				}
-				const launchBtn = document.getElementById("btn-launch-game");
-				if (launchBtn) {
-					if (!game.isInstalled) {
-						launchBtn.innerHTML = `<span class="btn-icon">⬇</span><span class="btn-text">ダウンロード (Download)</span>`;
-					} else {
-						launchBtn.innerHTML = `<span class="btn-icon">🔄</span><span class="btn-text">更新する (Update)</span>`;
-					}
-				}
+				game._latestVersion = res?.latest_version || game.version;
+				setLogText(needsInitialDownload
+					? `${game.title} をダウンロードできます`
+					: `${game.title} に新しいバージョン (${res.latest_version}) があります`);
+				updateDetailDownloadUi(game);
 			} else {
 				game._needsUpdate = false;
 				game._latestVersion = res ? res.latest_version : game.version;
 				setLogText(`${game.title} は最新版です`);
-				const statusEl = document.querySelector(".launch-status");
-				if (statusEl) {
-					statusEl.textContent = "起動可能 (最新)";
-					statusEl.className = "launch-status ready";
-				}
-				const launchBtn = document.getElementById("btn-launch-game");
-				if (launchBtn) {
-					launchBtn.innerHTML = `<span class="btn-icon">▶</span><span class="btn-text">起動する (Play)</span>`;
-				}
+				updateDetailDownloadUi(game);
 			}
 		} catch (e) {
 			console.warn("check_version error:", e);

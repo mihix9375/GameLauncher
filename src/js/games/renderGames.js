@@ -19,6 +19,7 @@ export function renderGames(games) {
 
 		const card = document.createElement("div");
 		card.className = "game-card";
+		card.dataset.gameId = String(game.id || game.game || "").replace(/\.exe$/i, "").toLocaleLowerCase();
 
 		const bannerWrap = document.createElement("div");
 		bannerWrap.className = "card-banner-wrap";
@@ -65,10 +66,26 @@ export function renderGames(games) {
 		actionWrap.className = "card-actions-wrap";
 		const actionBtn = document.createElement("button");
 		actionBtn.className = "card-action-btn";
+		const progress = game._downloadProgress;
+		const downloading = Boolean(game._isDownloading && progress);
+		const hasMeasuredProgress = progress?.total_bytes > 0;
+		const percentage = hasMeasuredProgress
+			? Math.min(100, Math.round((progress.received_bytes / progress.total_bytes) * 100))
+			: 0;
+		const progressLabel = progress?.stage === "queued" ? "ダウンロード待機中"
+			: progress?.stage === "preparing" ? "準備中"
+			: progress?.stage === "extracting" ? "展開中"
+			: progress?.stage === "installing" ? "適用中"
+			: `${percentage}% ダウンロード中`;
 
-		if (game.isInstalled === false) {
+		if (downloading) {
+			card.classList.add("is-downloading");
+			actionBtn.className += " downloading-btn";
+			actionBtn.disabled = true;
+			actionBtn.innerHTML = `<span class="btn-icon">⏳</span><span class="btn-text">${progressLabel}</span>`;
+		} else if (game.isInstalled === false) {
 			actionBtn.className += " download-btn";
-			actionBtn.innerHTML = `<span class="btn-icon">⬇</span><span class="btn-text">ダウンロード (Download)</span>`;
+			actionBtn.innerHTML = `<span class="btn-icon">⬇</span><span class="btn-text">ダウンロードする (Download)</span>`;
 		} else if (game.hasUpdate || game._needsUpdate) {
 			actionBtn.className += " update-btn";
 			actionBtn.innerHTML = `<span class="btn-icon">🔄</span><span class="btn-text">更新する (Update)</span>`;
@@ -83,6 +100,19 @@ export function renderGames(games) {
 		});
 		actionWrap.appendChild(actionBtn);
 		content.appendChild(actionWrap);
+		if (downloading) {
+			const progressWrap = document.createElement("div");
+			progressWrap.className = "card-download-progress";
+			progressWrap.setAttribute("role", "progressbar");
+			progressWrap.setAttribute("aria-valuemin", "0");
+			progressWrap.setAttribute("aria-valuemax", "100");
+			if (hasMeasuredProgress) progressWrap.setAttribute("aria-valuenow", String(percentage));
+			else progressWrap.classList.add("indeterminate");
+			const progressBar = document.createElement("span");
+			progressBar.style.width = `${percentage}%`;
+			progressWrap.appendChild(progressBar);
+			content.appendChild(progressWrap);
+		}
 
 		card.appendChild(bannerWrap);
 		card.appendChild(content);
@@ -93,4 +123,45 @@ export function renderGames(games) {
 
 		container.appendChild(card);
 	});
+}
+
+export function updateGameCardDownloadUi(game) {
+	if (!game?._isDownloading || !game._downloadProgress) return false;
+	const gameId = String(game.id || game.game || "").replace(/\.exe$/i, "").toLocaleLowerCase();
+	const card = [...document.querySelectorAll(".game-card")].find(element => element.dataset.gameId === gameId);
+	if (!card) return false;
+
+	const progress = game._downloadProgress;
+	const measured = progress.total_bytes > 0;
+	const percentage = measured
+		? Math.min(100, Math.round((progress.received_bytes / progress.total_bytes) * 100))
+		: 0;
+	const label = progress.stage === "queued" ? "ダウンロード待機中"
+		: progress.stage === "preparing" ? "準備中"
+		: progress.stage === "extracting" ? "展開中"
+		: progress.stage === "installing" ? "適用中"
+		: `${percentage}% ダウンロード中`;
+	card.classList.add("is-downloading");
+	const actionButton = card.querySelector(".card-action-btn");
+	if (actionButton) {
+		actionButton.className = "card-action-btn downloading-btn";
+		actionButton.disabled = true;
+		actionButton.innerHTML = `<span class="btn-icon">⏳</span><span class="btn-text">${label}</span>`;
+	}
+	let progressWrap = card.querySelector(".card-download-progress");
+	if (!progressWrap) {
+		progressWrap = document.createElement("div");
+		progressWrap.className = "card-download-progress";
+		progressWrap.setAttribute("role", "progressbar");
+		progressWrap.setAttribute("aria-valuemin", "0");
+		progressWrap.setAttribute("aria-valuemax", "100");
+		progressWrap.appendChild(document.createElement("span"));
+		card.querySelector(".card-content")?.appendChild(progressWrap);
+	}
+	progressWrap.classList.toggle("indeterminate", !measured);
+	if (measured) progressWrap.setAttribute("aria-valuenow", String(percentage));
+	else progressWrap.removeAttribute("aria-valuenow");
+	const bar = progressWrap.querySelector("span");
+	if (bar) bar.style.width = `${percentage}%`;
+	return true;
 }

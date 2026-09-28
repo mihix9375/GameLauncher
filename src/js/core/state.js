@@ -34,6 +34,11 @@ function canonicalGameId(value) {
 	return String(value || "").trim().replace(/\.exe$/i, "").toLocaleLowerCase();
 }
 
+export function findGameById(gameId) {
+	const targetId = canonicalGameId(gameId);
+	return allGames.find(game => canonicalGameId(game.id || game.game) === targetId);
+}
+
 export function removeGameById(gameId) {
 	const targetId = canonicalGameId(gameId);
 	if (!targetId) return false;
@@ -61,7 +66,7 @@ export function getMockMetadata() {
 }
 
 export function setGameUpdateFlag(gameId, version) {
-	const game = allGames.find(g => g.id === gameId || g.game === gameId);
+	const game = findGameById(gameId);
 	if (game) {
 		game.hasUpdate = true;
 		game._needsUpdate = true;
@@ -79,4 +84,24 @@ export function setGameUpdateFlag(gameId, version) {
 			image: "3"
 		});
 	}
+}
+
+export function setGameDownloadProgress(gameId, progress) {
+	const game = findGameById(gameId);
+	if (!game) return false;
+	if (!progress || progress.stage === "complete") {
+		delete game._downloadProgress;
+		game._isDownloading = false;
+		return true;
+	}
+	if (progress.stage === "error") {
+		delete game._downloadProgress;
+		game._isDownloading = false;
+		game._downloadError = progress.error || "ダウンロードに失敗しました";
+		return true;
+	}
+	game._downloadProgress = progress;
+	game._isDownloading = true;
+	delete game._downloadError;
+	return true;
 }

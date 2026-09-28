@@ -6,15 +6,94 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use tonic::Request;
+use tauri::{AppHandle, Emitter};
 
 use super::game_archive::extract_archive;
 
-pub(crate) static GAME_STORAGE_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+static GAME_STORAGE_LOCKS: std::sync::OnceLock<tokio::sync::Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>> = std::sync::OnceLock::new();
 const MANIFEST_FILE: &str = ".gamelauncher-manifest.json";
 const DISK_WRITE_BUFFER_SIZE: usize = 8 * 1024 * 1024;
 const FULL_ARCHIVE_WRITE_QUEUE_DEPTH: usize = 24;
 const FILE_WRITE_QUEUE_DEPTH: usize = 4;
 const PARALLEL_FILE_STREAMS: usize = 4;
+
+pub(crate) async fn game_storage_lock(game_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>>
+{
+	let mut locks = GAME_STORAGE_LOCKS
+		.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
+		.lock()
+		.await;
+	locks.entry(game_id.to_string())
+		.or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+		.clone()
+}
+
+#[derive(Clone, Serialize)]
+struct DownloadProgressEvent
+{
+	game_id: String,
+	stage: String,
+	received_bytes: u64,
+	total_bytes: u64,
+	error: Option<String>,
+}
+
+#[derive(Clone)]
+struct DownloadProgress
+{
+	app_handle: AppHandle,
+	game_id: String,
+	received_bytes: std::sync::Arc<std::sync::atomic::AtomicU64>,
+	total_bytes: u64,
+}
+
+impl DownloadProgress
+{
+	fn new(app_handle: &AppHandle, game_id: &str, total_bytes: u64) -> Self
+	{
+		Self {
+			app_handle: app_handle.clone(),
+			game_id: game_id.to_string(),
+			received_bytes: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+			total_bytes,
+		}
+	}
+
+	fn add_received(&self, bytes: u64)
+	{
+		let received = self.received_bytes.fetch_add(bytes, std::sync::atomic::Ordering::Relaxed)
+			.saturating_add(bytes);
+		self.emit("downloading", received, None);
+	}
+
+	fn stage(&self, stage: &str)
+	{
+		let received = self.received_bytes.load(std::sync::atomic::Ordering::Relaxed);
+		self.emit(stage, received, None);
+	}
+
+	fn emit(&self, stage: &str, received_bytes: u64, error: Option<String>)
+	{
+		let _ = self.app_handle.emit("download_progress", DownloadProgressEvent {
+			game_id: self.game_id.clone(),
+			stage: stage.to_string(),
+			received_bytes,
+			total_bytes: self.total_bytes,
+			error,
+		});
+	}
+}
+
+fn emit_download_state(app_handle: &AppHandle, game_id: &str, stage: &str, error: Option<String>)
+{
+	let _ = app_handle.emit("download_progress", DownloadProgressEvent {
+		game_id: game_id.to_string(),
+		stage: stage.to_string(),
+		received_bytes: 0,
+		total_bytes: 0,
+		error,
+	});
+}
 
 struct UpdatePaths
 {
@@ -62,11 +141,13 @@ impl UpdatePaths
 }
 
 #[tauri::command]
-pub async fn download_game(game_id: String, version: String) -> Result<(), String>
+pub async fn download_game(app_handle: AppHandle, game_id: String, version: String) -> Result<(), String>
 {
-	let _download_guard = GAME_STORAGE_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
-	let games_path = crate::env::get_games_path()?;
 	let clean_id = crate::env::normalize_game_id(&game_id)?;
+	let storage_lock = game_storage_lock(&clean_id).await;
+	let _download_guard = storage_lock.lock().await;
+	let games_path = crate::env::get_games_path()?;
+	emit_download_state(&app_handle, &clean_id, "preparing", None);
 	let game_path = games_path.join(&clean_id);
 	let paths = UpdatePaths::new(&games_path, &clean_id);
 	recover_game_backup(&game_path, &paths.backup).await?;
@@ -75,10 +156,13 @@ pub async fn download_game(game_id: String, version: String) -> Result<(), Strin
 		.await
 		.map_err(|e| e.to_string())?;
 
-	let result = download_and_install(&clean_id, &version, &game_path, &paths).await;
+	let result = download_and_install(&app_handle, &clean_id, &version, &game_path, &paths).await;
 	let _ = tokio::fs::remove_dir_all(&paths.work_dir).await;
 	if result.is_ok() {
 		let _ = tokio::fs::remove_dir_all(&paths.backup).await;
+		emit_download_state(&app_handle, &clean_id, "complete", None);
+	} else if let Err(error) = &result {
+		emit_download_state(&app_handle, &clean_id, "error", Some(error.clone()));
 	}
 	result
 }
@@ -95,6 +179,7 @@ async fn recover_game_backup(game_path: &Path, backup: &Path) -> Result<(), Stri
 }
 
 async fn download_and_install(
+	app_handle: &AppHandle,
 	game_id: &str,
 	version: &str,
 	game_path: &Path,
@@ -114,25 +199,31 @@ async fn download_and_install(
 
 	if game_path.is_dir()
 	{
-		install_differential_update(&mut client, game_id, version, game_path, paths, &manifest).await?;
+		install_differential_update(app_handle, &mut client, game_id, version, game_path, paths, &manifest).await?;
 	}
 	else
 	{
-		install_full_download(&mut client, download_request, paths, &manifest).await?;
+		install_full_download(app_handle, game_id, &mut client, download_request, paths, &manifest).await?;
 	}
 
+	emit_download_state(app_handle, game_id, "installing", None);
 	validate_staged_game(&paths.extracted, game_id, version)?;
 	install_atomically(game_path, &paths.extracted, &paths.backup).await
 }
 
 async fn install_full_download(
+	app_handle: &AppHandle,
+	game_id: &str,
 	client: &mut crate::env::gamelauncher::game_service_client::GameServiceClient<tonic::transport::Channel>,
 	request: DownloadRequest,
 	paths: &UpdatePaths,
 	manifest: &GameManifest,
 ) -> Result<(), String>
 {
-	download_full_archive(client, request, paths).await?;
+	let progress = DownloadProgress::new(app_handle, game_id, manifest.archive_size);
+	progress.stage("downloading");
+	download_full_archive(client, request, paths, &progress).await?;
+	progress.stage("extracting");
 	let archive = paths.archive.clone();
 	let extracted = paths.extracted.clone();
 	tokio::task::spawn_blocking(move || {
@@ -176,6 +267,7 @@ async fn download_full_archive(
 	client: &mut crate::env::gamelauncher::game_service_client::GameServiceClient<tonic::transport::Channel>,
 	request: DownloadRequest,
 	paths: &UpdatePaths,
+	progress: &DownloadProgress,
 ) -> Result<(), String>
 {
 	let response = client.download_game(Request::new(request)).await.map_err(|e| e.to_string())?;
@@ -209,6 +301,7 @@ async fn download_full_archive(
 			}
 			expected_index += 1;
 			received_data = true;
+			progress.add_received(chunk.data.len() as u64);
 			disk_sender.send(chunk.data).await.map_err(|_| "ダウンロードデータを書き込めません".to_string())?;
 		}
 		if received_data { Ok(()) } else { Err("ダウンロードデータが空です".to_string()) }
@@ -220,6 +313,7 @@ async fn download_full_archive(
 }
 
 async fn install_differential_update(
+	app_handle: &AppHandle,
 	client: &mut crate::env::gamelauncher::game_service_client::GameServiceClient<tonic::transport::Channel>,
 	game_id: &str,
 	version: &str,
@@ -232,12 +326,18 @@ async fn install_differential_update(
 	let changed_files = changed_files(game_path, manifest, &installed).await?;
 	if should_use_full_download(manifest, &changed_files)
 	{
-		return install_full_download(client, DownloadRequest {
+		return install_full_download(app_handle, game_id, client, DownloadRequest {
 			game_id: game_id.to_string(),
 			version: version.to_string(),
 		}, paths, manifest).await;
 	}
 	let changed_set = changed_files.iter().map(|file| file.path.clone()).collect::<HashSet<_>>();
+	let progress = DownloadProgress::new(
+		app_handle,
+		game_id,
+		changed_files.iter().map(|file| file.size).sum(),
+	);
+	progress.stage("downloading");
 
 	let source = game_path.to_path_buf();
 	let staging = paths.extracted.clone();
@@ -256,13 +356,14 @@ async fn install_differential_update(
 			let request_game_id = game_id.to_string();
 			let request_version = version.to_string();
 			let staging = paths.extracted.clone();
+			let stream_progress = progress.clone();
 			tasks.push(tokio::spawn(async move {
 				let response = stream_client.download_game_files(Request::new(GameFilesRequest {
 					game_id: request_game_id,
 					version: request_version,
 					paths: files.iter().map(|file| file.path.clone()).collect(),
 				})).await.map_err(|error| error.message().to_string())?;
-				write_file_stream(response.into_inner(), &staging, &files).await
+				write_file_stream(response.into_inner(), &staging, &files, &stream_progress).await
 			}));
 		}
 		for task in tasks
@@ -384,6 +485,7 @@ async fn write_file_stream(
 	mut stream: tonic::Streaming<crate::env::gamelauncher::GameFileData>,
 	staging: &Path,
 	files: &[GameFile],
+	progress: &DownloadProgress,
 ) -> Result<(), String>
 {
 	let staging = staging.to_path_buf();
@@ -401,6 +503,7 @@ async fn write_file_stream(
 	let receive_result = async {
 		while let Some(chunk) = stream.message().await.map_err(|error| error.to_string())?
 		{
+			if !chunk.complete { progress.add_received(chunk.data.len() as u64); }
 			disk_sender.send(chunk).await.map_err(|_| "差分データを書き込めません".to_string())?;
 		}
 		Ok(())
@@ -604,6 +707,17 @@ mod tests
 			std::process::id(),
 			std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
 		))
+	}
+
+	#[tokio::test]
+	async fn storage_locks_only_serialize_the_same_game()
+	{
+		let first = game_storage_lock("parallel-lock-a").await;
+		let same = game_storage_lock("parallel-lock-a").await;
+		let other = game_storage_lock("parallel-lock-b").await;
+
+		assert!(std::sync::Arc::ptr_eq(&first, &same));
+		assert!(!std::sync::Arc::ptr_eq(&first, &other));
 	}
 
 	#[tokio::test]

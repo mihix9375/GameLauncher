@@ -1,10 +1,10 @@
 import { invoke } from "../core/tauri.js";
 import { setLogText } from "../ui/log.js";
 import { formatError } from "../core/errors.js";
-import { getAllGames, removeGameById } from "../core/state.js";
+import { getAllGames, setGameDownloadProgress } from "../core/state.js";
 import { renderGames } from "./renderGames.js";
-import { updateGameCount } from "../ui/counter.js";
-import { closeModal } from "../ui/modal.js";
+import { updateDetailDownloadUi } from "../modals/detailModal.js";
+import { refreshGameCard } from "./loadGames.js";
 
 let launchRequestInProgress = false;
 
@@ -14,6 +14,7 @@ export async function launchGame(game) {
 		return;
 	}
 	launchRequestInProgress = true;
+	let downloadAttempted = false;
 
 	try {
 		if (window.__TAURI__ && await invoke("is_game_running")) {
@@ -35,7 +36,7 @@ export async function launchGame(game) {
 
 		if (window.__TAURI__) {
 			const targetId = (game.id || game.game || "").replace(".exe", "");
-			let needsDownload = game._needsUpdate;
+			let needsDownload = game.isInstalled === false ? true : game._needsUpdate;
 			if (needsDownload === undefined) {
 				try {
 					setLogText(`${game.title} の更新情報を確認中...`);
@@ -51,10 +52,21 @@ export async function launchGame(game) {
 			}
 
 			if (needsDownload) {
+				downloadAttempted = true;
 				setLogText(`${game.title} をダウンロード/更新中...`);
+				setGameDownloadProgress(targetId, {
+					game_id: targetId,
+					stage: "queued",
+					received_bytes: 0,
+					total_bytes: 0,
+				});
+				renderGames(getAllGames());
+				updateDetailDownloadUi(game);
 				await invoke("download_game", { gameId: targetId, version: game._latestVersion || game.version });
 				game._needsUpdate = false;
+				game.hasUpdate = false;
 				game.isInstalled = true;
+				setGameDownloadProgress(targetId, null);
 				if (game._latestVersion) {
 					game.version = game._latestVersion;
 				}
@@ -63,6 +75,10 @@ export async function launchGame(game) {
 					statusEl.textContent = "起動可能 (最新)";
 					statusEl.className = "launch-status ready";
 				}
+				const refreshedGame = await refreshGameCard(targetId);
+				updateDetailDownloadUi(refreshedGame || game);
+				setLogText(`${game.title} のダウンロードが完了しました`);
+				return;
 			}
 
 			setLogText(`${game.title} を起動中...`);
@@ -87,25 +103,16 @@ export async function launchGame(game) {
 		const wasRemoteOnly = game.isInstalled === false;
 		const detail = formatError(
 			error,
-			wasRemoteOnly
+			downloadAttempted || wasRemoteOnly
 				? "サーバーからゲームを取得できませんでした。配布が終了している可能性があります。"
 				: "ゲームを起動できませんでした。",
 		);
-		if (wasRemoteOnly) {
-			removeGameById(game.id || game.game);
-			renderGames(getAllGames());
-			updateGameCount(getAllGames().length);
-			closeModal("detail-modal");
-		}
-		setLogText(`エラー: ${game.title} の起動に失敗しました (${detail})`);
-		alert(`ゲームの起動時にエラーが発生しました。\n詳細: ${detail}`);
-
-		const launchBtn = document.getElementById("btn-launch-game");
-		if (launchBtn) {
-			launchBtn.innerHTML = `<span class="btn-icon">▶</span><span class="btn-text">起動する (Play)</span>`;
-			launchBtn.style.opacity = "1";
-			launchBtn.style.pointerEvents = "auto";
-		}
+		setGameDownloadProgress(game.id || game.game, { stage: "error", error: String(error) });
+		renderGames(getAllGames());
+		updateDetailDownloadUi(game);
+		const operation = downloadAttempted || wasRemoteOnly ? "ダウンロード" : "起動";
+		setLogText(`エラー: ${game.title} の${operation}に失敗しました (${detail})`);
+		alert(`ゲームの${operation}時にエラーが発生しました。\n詳細: ${detail}`);
 	} finally {
 		launchRequestInProgress = false;
 	}

@@ -71,8 +71,11 @@
 
       <!-- Floating Action Controls (Matching pepi UpdateButton & Settings Button) -->
       <div class="floating-controls">
-        <button id="btn-refresh" class="fab-btn update-btn" title="情報を更新 (Update)">
+        <button id="btn-refresh" class="fab-btn update-btn" title="ゲーム情報を更新">
           <span class="fab-icon">🔄</span>
+        </button>
+        <button id="btn-download-all" class="fab-btn download-all-btn" title="全ゲームをダウンロード・更新">
+          <span class="fab-icon">⬇</span>
         </button>
         <button id="btn-settings" class="fab-btn settings-btn" title="設定 (Settings)">
           <span class="fab-icon">⚙️</span>
@@ -144,6 +147,10 @@
                         <span class="btn-text">起動する (Play)</span>
                       </button>
                       <span class="launch-status ready">起動可能</span>
+                      <div id="detail-download-progress" class="detail-download-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden>
+                        <div class="detail-download-progress-track"><span id="detail-download-progress-bar"></span></div>
+                        <span id="detail-download-progress-label">準備中</span>
+                      </div>
                     </div>
                     <nav class="detail-jump-actions" aria-label="詳細画面内の移動">
                       <button id="btn-jump-ranking" class="detail-jump-button" type="button" hidden>🏆 ランキング</button>

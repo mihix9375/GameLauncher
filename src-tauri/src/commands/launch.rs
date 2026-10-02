@@ -25,19 +25,28 @@ struct OverlayGeometry
 pub struct GameProcessState
 {
 	child: Arc<Mutex<Option<Child>>>,
-	active_game: Arc<Mutex<Option<(u32, String)>>>,
+	active_game: Arc<Mutex<Option<ActiveGame>>>,
 	shutting_down: Arc<AtomicBool>,
 	confirming_close: Arc<AtomicBool>,
 	game_suspended: Arc<AtomicBool>,
 }
 
+struct ActiveGame
+{
+	process_id: u32,
+	game_id: String,
+	session_token: String,
+}
+
 impl GameProcessState
 {
-	pub fn active_game_id(&self) -> Result<Option<String>, String>
+	pub fn game_id_for_session(&self, session_token: &str) -> Result<Option<String>, String>
 	{
 		self.active_game
 			.lock()
-			.map(|active| active.as_ref().map(|(_, game_id)| game_id.clone()))
+			.map(|active| active.as_ref().and_then(|game| {
+				(game.session_token == session_token).then(|| game.game_id.clone())
+			}))
 			.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())
 	}
 }
@@ -125,8 +134,11 @@ pub fn launch(
 
 	let mut command = Command::new(&exe_path);
 	command.current_dir(&game_dir);
-	// ランキングAPI側でmeta.jsonのIDを手入力せず取得できるよう、子プロセスへ渡す。
-	command.env("GAMELAUNCHER_GAME_ID", &clean_id);
+	// ゲームIDは渡さず、起動ごとに異なる資格情報だけを子プロセスへ渡す。
+	// ローカルAPIはこの資格情報から起動中ゲームを特定するため、ゲーム側から
+	// 別ゲームのIDを指定してランキングを変更することはできない。
+	let session_token = uuid::Uuid::new_v4().simple().to_string();
+	command.env("GAMELAUNCHER_SESSION_TOKEN", &session_token);
 	if is_unity_game(&exe_path, &game_dir) {
 		// UnityのF11切り替えを排他的フルスクリーンではなく、
 		// 外部オーバーレイを表示できるボーダーレス方式に固定する。
@@ -138,7 +150,11 @@ pub fn launch(
 	let process_id = child.id();
 	*guard = Some(child);
 	*process_state.active_game.lock()
-		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = Some((process_id, clean_id));
+		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = Some(ActiveGame {
+			process_id,
+			game_id: clean_id,
+			session_token,
+		});
 	process_state.confirming_close.store(false, Ordering::SeqCst);
 	process_state.game_suspended.store(false, Ordering::SeqCst);
 	drop(guard);
@@ -335,7 +351,7 @@ fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, pro
 				process_state.game_suspended.store(false, Ordering::SeqCst);
 				if let Ok(mut active) = process_state.active_game.lock()
 				{
-					if active.as_ref().is_some_and(|(id, _)| *id == process_id) { *active = None; }
+					if active.as_ref().is_some_and(|game| game.process_id == process_id) { *active = None; }
 				}
 				hide_overlay(&app_handle);
 				return;
@@ -675,7 +691,7 @@ pub fn terminate_game_if_running(app_handle: &AppHandle, game_id: &str) -> Resul
 	let is_target_running = process_state.active_game.lock()
 		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?
 		.as_ref()
-		.is_some_and(|(_, active_id)| active_id == game_id);
+		.is_some_and(|active| active.game_id == game_id);
 	if is_target_running
 	{
 		terminate_current_game(process_state.inner())?;
@@ -735,5 +751,18 @@ mod tests
 		assert!(is_unity_game(&root.join("Sample.exe"), &root));
 		assert!(!is_unity_game(&root.join("Other.exe"), &root));
 		let _ = std::fs::remove_dir_all(root);
+	}
+
+	#[test]
+	fn session_token_only_resolves_its_launched_game()
+	{
+		let state = GameProcessState::default();
+		*state.active_game.lock().unwrap() = Some(ActiveGame {
+			process_id: 42,
+			game_id: "game-a".into(),
+			session_token: "secret-a".into(),
+		});
+		assert_eq!(state.game_id_for_session("secret-a").unwrap().as_deref(), Some("game-a"));
+		assert_eq!(state.game_id_for_session("secret-b").unwrap(), None);
 	}
 }

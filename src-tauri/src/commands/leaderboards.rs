@@ -1,15 +1,15 @@
 use std::time::Duration;
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
 const LOCAL_API_BIND: &str = "127.0.0.1:50053";
-const LIST_ROUTE: &str = "/v1/games/{game_id}/leaderboards";
-const SUBMIT_ROUTE: &str = "/v1/games/{game_id}/leaderboards/{board_id}/scores";
+const LIST_ROUTE: &str = "/v1/leaderboards";
+const SUBMIT_ROUTE: &str = "/v1/leaderboards/{board_id}/scores";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_BOARD_ID_LENGTH: usize = 32;
 
@@ -28,6 +28,8 @@ pub struct Leaderboard
 	pub id: String,
 	pub name: String,
 	pub order: String,
+	#[serde(default = "default_enabled")]
+	pub enabled: bool,
 	pub entries: Vec<RankedEntry>,
 }
 
@@ -36,6 +38,26 @@ struct LeaderboardListResponse
 {
 	game_id: String,
 	leaderboards: Vec<Leaderboard>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct LocalLeaderboardListResponse
+{
+	leaderboards: Vec<Leaderboard>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct SyncLeaderboardDefinition
+{
+	name: String,
+	order: String,
+	enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct SyncLeaderboardsRequest
+{
+	leaderboards: Vec<SyncLeaderboardDefinition>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -65,11 +87,32 @@ struct ServerError
 	message: String,
 }
 
-fn launched_game_id(process_state: &crate::commands::launch::GameProcessState) -> Result<String, String>
+fn authorized_game_id(
+	headers: &HeaderMap,
+	process_state: &crate::commands::launch::GameProcessState,
+) -> Result<String, (StatusCode, Json<ProxyError>)>
 {
-	process_state.active_game_id()?
-		.ok_or_else(|| "GameLauncherから起動中のゲームがありません".to_string())
+	let token = headers
+		.get(axum::http::header::AUTHORIZATION)
+		.and_then(|value| value.to_str().ok())
+		.and_then(|value| value.strip_prefix("Bearer "))
+		.filter(|value| !value.is_empty())
+		.ok_or_else(unauthorized)?;
+	process_state
+		.game_id_for_session(token)
+		.map_err(proxy_error)?
+		.ok_or_else(unauthorized)
 }
+
+fn unauthorized() -> (StatusCode, Json<ProxyError>)
+{
+	(StatusCode::UNAUTHORIZED, Json(ProxyError {
+		ok: false,
+		message: "このゲームセッションはランキングAPIを利用できません".to_string(),
+	}))
+}
+
+fn default_enabled() -> bool { true }
 
 fn server_client() -> Result<Client, String>
 {
@@ -161,6 +204,39 @@ async fn submit_to_server(
 		.map_err(|error| format!("ランキングの応答が不正です: {error}"))
 }
 
+async fn sync_with_server(
+	game_id: &str,
+	request: SyncLeaderboardsRequest,
+) -> Result<LeaderboardListResponse, String>
+{
+	let game_id = crate::env::normalize_game_id(game_id)?;
+	let response = server_client()?
+		.put(server_endpoint(&game_id, None)?)
+		.json(&request)
+		.send()
+		.await
+		.map_err(|error| format!("ランキングServerに接続できません: {error}"))?;
+	let status = response.status();
+	if !status.is_success()
+	{
+		let message = response.json::<ServerError>().await
+			.map(|error| error.message)
+			.unwrap_or_else(|_| format!("ランキングを同期できません (HTTP {status})"));
+		return Err(message);
+	}
+	response.json().await
+		.map_err(|error| format!("ランキングの応答が不正です: {error}"))
+}
+
+fn expose_slots(mut result: LeaderboardListResponse) -> LocalLeaderboardListResponse
+{
+	for (index, board) in result.leaderboards.iter_mut().enumerate()
+	{
+		board.id = index.to_string();
+	}
+	LocalLeaderboardListResponse { leaderboards: result.leaderboards }
+}
+
 #[tauri::command]
 pub async fn get_leaderboards(game_id: String) -> Result<Vec<Leaderboard>, String>
 {
@@ -176,21 +252,42 @@ fn proxy_error(message: String) -> (StatusCode, Json<ProxyError>)
 
 async fn proxy_list(
 	State(process_state): State<crate::commands::launch::GameProcessState>,
-	Path(_requested_game_id): Path<String>,
-) -> ProxyResult<LeaderboardListResponse>
+	headers: HeaderMap,
+) -> ProxyResult<LocalLeaderboardListResponse>
 {
-	let game_id = launched_game_id(&process_state).map_err(proxy_error)?;
-	Ok(Json(fetch_from_server(&game_id).await.map_err(proxy_error)?))
+	let game_id = authorized_game_id(&headers, &process_state)?;
+	let result = fetch_from_server(&game_id).await.map_err(proxy_error)?;
+	Ok(Json(expose_slots(result)))
+}
+
+async fn proxy_sync(
+	State(process_state): State<crate::commands::launch::GameProcessState>,
+	headers: HeaderMap,
+	Json(request): Json<SyncLeaderboardsRequest>,
+) -> ProxyResult<LocalLeaderboardListResponse>
+{
+	let game_id = authorized_game_id(&headers, &process_state)?;
+	let result = sync_with_server(&game_id, request).await.map_err(proxy_error)?;
+	Ok(Json(expose_slots(result)))
 }
 
 async fn proxy_submit(
 	State(process_state): State<crate::commands::launch::GameProcessState>,
-	Path((_requested_game_id, board_id)): Path<(String, String)>,
+	headers: HeaderMap,
+	Path(board_slot): Path<usize>,
 	Json(submission): Json<ScoreSubmission>,
 ) -> ProxyResult<ScoreSubmissionResponse>
 {
-	let game_id = launched_game_id(&process_state).map_err(proxy_error)?;
-	let result = submit_to_server(&game_id, &board_id, submission)
+	let game_id = authorized_game_id(&headers, &process_state)?;
+	if board_slot > 1
+	{
+		return Err(proxy_error("ランキング番号は0または1で指定してください".to_string()));
+	}
+	let boards = fetch_from_server(&game_id).await.map_err(proxy_error)?;
+	let board_id = boards.leaderboards.get(board_slot)
+		.map(|board| board.id.as_str())
+		.ok_or_else(|| proxy_error("指定したランキングはまだ同期されていません".to_string()))?;
+	let result = submit_to_server(&game_id, board_id, submission)
 		.await
 		.map_err(proxy_error)?;
 	Ok(Json(result))
@@ -199,7 +296,7 @@ async fn proxy_submit(
 pub async fn serve_local_api(process_state: crate::commands::launch::GameProcessState)
 {
 	let app = Router::new()
-		.route(LIST_ROUTE, get(proxy_list))
+		.route(LIST_ROUTE, get(proxy_list).put(proxy_sync))
 		.route(SUBMIT_ROUTE, post(proxy_submit))
 		.with_state(process_state);
 	let listener = match tokio::net::TcpListener::bind(LOCAL_API_BIND).await
@@ -215,5 +312,25 @@ pub async fn serve_local_api(process_state: crate::commands::launch::GameProcess
 	if let Err(error) = axum::serve(listener, app).await
 	{
 		eprintln!("Unity leaderboard API error: {error}");
+	}
+}
+
+#[cfg(test)]
+mod tests
+{
+	use super::*;
+
+	#[test]
+	fn server_board_ids_are_hidden_behind_slots()
+	{
+		let result = expose_slots(LeaderboardListResponse {
+			game_id: "game".into(),
+			leaderboards: vec![
+				Leaderboard { id: "old_score".into(), name: "Score".into(), order: "high_score".into(), enabled: true, entries: vec![] },
+				Leaderboard { id: "old_time".into(), name: "Time".into(), order: "low_score".into(), enabled: true, entries: vec![] },
+			],
+		});
+		assert_eq!(result.leaderboards[0].id, "0");
+		assert_eq!(result.leaderboards[1].id, "1");
 	}
 }

@@ -1560,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "gamelauncher"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1580,6 +1580,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "uuid",
  "windows",
  "zip 8.6.0",
 ]

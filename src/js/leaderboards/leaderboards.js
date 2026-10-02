@@ -67,7 +67,8 @@ export async function loadLeaderboards(game, options = {}) {
 		return;
 	}
 	try {
-		const boards = await invoke("get_leaderboards", { gameId: gameId(game) });
+		const boards = (await invoke("get_leaderboards", { gameId: gameId(game) }))
+			.filter(board => board.enabled !== false);
 		if (current !== requestNumber) {
 			return;
 		}

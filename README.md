@@ -75,17 +75,20 @@ GameServerの管理画面でゲームが削除されると、Launcher側のイ�
 
 Unity Package Managerから専用パッケージを追加すると、HTTPやJSONを直接実装せずに利用できます。
 
+> [!IMPORTANT]
+> ランキングAPI v0.2.0は旧APIと後方互換性がありません。`game_id`や自由文字列のランキングIDを指定する方式は廃止され、GameLauncherが発行するセッショントークンと固定スロット`0`・`1`を使用します。GameLauncher v0.6.0、GameServer v0.5.0、UPMパッケージ v0.2.0を組み合わせてください。
+
 ```text
-https://github.com/mihix9375/GameLauncher-Unity-Ranking.git#v0.1.3
+https://github.com/mihix9375/GameLauncher-Unity-Ranking.git#v0.2.0
 ```
 
 ```csharp
 using GameLauncher.Ranking;
 
-ScoreResult result = await RankingApi.SubmitScoreAsync(
-    "high_score",   // GameServerで設定したランキングID
-    playerName,
-    score);
+var ranks = await RankingApi.SyncLeaderboardsAsync();
+await ranks[0].SetAsync("ハイスコア", RankingOrder.HighScore);
+await ranks[0].EnableAsync();
+ScoreResult result = await ranks[0].InsertAsync(playerName, score);
 ```
 
 詳しい導入方法とサンプルは [GameLauncher-Unity-Ranking](https://github.com/mihix9375/GameLauncher-Unity-Ranking) を参照してください。
@@ -93,19 +96,21 @@ ScoreResult result = await RankingApi.SubmitScoreAsync(
 パッケージを使用しない場合は、次のHTTP APIを直接呼び出すこともできます。
 
 ```http
-GET http://127.0.0.1:50053/v1/games/{game_id}/leaderboards
+GET http://127.0.0.1:50053/v1/leaderboards
+Authorization: Bearer {GameLauncherが起動時に渡すトークン}
 ```
 
 ```http
-POST http://127.0.0.1:50053/v1/games/{game_id}/leaderboards/{leaderboard_id}/scores
+POST http://127.0.0.1:50053/v1/leaderboards/{slot}/scores
+Authorization: Bearer {GameLauncherが起動時に渡すトークン}
 Content-Type: application/json
 
 {"player_name":"PLAYER","score":12000}
 ```
 
-応答形式などの低水準仕様はGameServerの [UNITY_LEADERBOARD_API.md](https://github.com/mihix9375/GameServer/blob/dev/UNITY_LEADERBOARD_API.md) を参照してください。Launcherを終了するとローカルAPIも終了します。
+ゲーム側の定義配列を同期する場合は`PUT /v1/leaderboards`を使います。配列位置がランキングスロット`0`・`1`になり、スコア送信もこの番号だけを指定します。ゲームIDはどのAPIにも指定せず、Launcherが起動時に発行したセッショントークンから対象ゲームを内部で確定します。
 
-ローカルAPIの`{game_id}`は旧版との互換用です。Launcherは実際に起動中のゲームを判定し、そのゲームのIDをServerへ送ります。
+応答形式などの低水準仕様はGameServerの [UNITY_LEADERBOARD_API.md](https://github.com/mihix9375/GameServer/blob/main/UNITY_LEADERBOARD_API.md) を参照してください。Launcherを終了するとローカルAPIも終了します。
 
 ## 開発環境
 

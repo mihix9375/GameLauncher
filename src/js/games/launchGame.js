@@ -26,7 +26,6 @@ export async function launchGame(game) {
 
 		setLogText(`${game.title} を起動中...`);
 		const launchBtn = document.getElementById("btn-launch-game");
-		const originalText = launchBtn?.innerHTML || "";
 
 		if (launchBtn) {
 			launchBtn.innerHTML = `<span class="btn-icon">⏳</span><span class="btn-text">起動処理中...</span>`;
@@ -89,14 +88,9 @@ export async function launchGame(game) {
 		}
 
 		setLogText(`${game.title} を実行中`);
-
-		setTimeout(() => {
-			if (launchBtn) {
-				launchBtn.innerHTML = originalText;
-				launchBtn.style.opacity = "1";
-				launchBtn.style.pointerEvents = "auto";
-			}
-		}, 2000);
+		// 詳細画面がまだ同じゲームを表示している場合だけUIを戻す。
+		// 閉じた画面や、後から開いた別ゲームのボタンを古いタイマーで変更しない。
+		updateDetailDownloadUi(game);
 
 	} catch (error) {
 		console.error("Launch error:", error);

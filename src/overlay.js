@@ -3,7 +3,14 @@ const confirmation = document.getElementById("close-confirmation");
 const cancelButton = document.getElementById("confirm-cancel");
 const confirmButton = document.getElementById("confirm-close");
 
+function waitForHiddenFrame() {
+  return new Promise(resolve => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  });
+}
+
 window.showCloseConfirmation = () => {
+  document.body.classList.remove("is-positioning");
   document.body.classList.add("is-confirming");
   confirmation?.setAttribute("aria-hidden", "false");
   window.setTimeout(() => cancelButton?.focus(), 0);
@@ -13,6 +20,21 @@ window.hideCloseConfirmation = () => {
   document.body.classList.remove("is-confirming");
   confirmation?.setAttribute("aria-hidden", "true");
 };
+
+closeButton?.addEventListener("click", async () => {
+  if (closeButton.disabled) return;
+  closeButton.disabled = true;
+  document.body.classList.add("is-positioning");
+  document.body.classList.remove("overlay-ready");
+  await waitForHiddenFrame();
+  try {
+    await window.__TAURI__.core.invoke("request_close_game");
+  } catch (error) {
+    console.error("Failed to show close confirmation:", error);
+  } finally {
+    closeButton.disabled = false;
+  }
+});
 
 confirmButton?.addEventListener("click", async () => {
   confirmButton.disabled = true;
@@ -29,10 +51,14 @@ confirmButton?.addEventListener("click", async () => {
 
 cancelButton?.addEventListener("click", async () => {
   cancelButton.disabled = true;
+  document.body.classList.add("is-positioning");
+  window.hideCloseConfirmation?.();
+  await waitForHiddenFrame();
   try {
     await window.__TAURI__.core.invoke("cancel_close_game");
   } catch (error) {
     console.error("Failed to cancel closing the game:", error);
+    window.showCloseConfirmation?.();
   } finally {
     cancelButton.disabled = false;
   }

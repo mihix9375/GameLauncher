@@ -28,6 +28,7 @@ pub struct GameProcessState
 	active_game: Arc<Mutex<Option<(u32, String)>>>,
 	shutting_down: Arc<AtomicBool>,
 	confirming_close: Arc<AtomicBool>,
+	game_suspended: Arc<AtomicBool>,
 }
 
 impl GameProcessState
@@ -52,6 +53,7 @@ pub fn is_game_running(process_state: State<'_, GameProcessState>) -> Result<boo
 		Ok(None) => Ok(true),
 		Ok(Some(_)) => {
 			*child = None;
+			process_state.game_suspended.store(false, Ordering::SeqCst);
 			*process_state.active_game.lock()
 				.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = None;
 			Ok(false)
@@ -138,6 +140,7 @@ pub fn launch(
 	*process_state.active_game.lock()
 		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = Some((process_id, clean_id));
 	process_state.confirming_close.store(false, Ordering::SeqCst);
+	process_state.game_suspended.store(false, Ordering::SeqCst);
 	drop(guard);
 
 	if let Err(error) = show_overlay(&app_handle) {
@@ -145,7 +148,31 @@ pub fn launch(
 		return Err(error);
 	}
 	monitor_game_exit(app_handle.clone(), process_state.inner().clone(), process_id);
-	monitor_overlay_input(app_handle, process_state.inner().clone(), process_id);
+	Ok(())
+}
+
+#[tauri::command]
+pub fn request_close_game(
+	app_handle: AppHandle,
+	process_state: State<'_, GameProcessState>,
+) -> Result<(), String>
+{
+	if process_state.confirming_close.swap(true, Ordering::SeqCst) {
+		return Ok(());
+	}
+	if current_process_id(process_state.inner())?.is_none() {
+		process_state.confirming_close.store(false, Ordering::SeqCst);
+		return Err("起動中のゲームが見つかりません".to_string());
+	}
+	if let Err(error) = suspend_current_game(process_state.inner()) {
+		eprintln!("ゲームを一時停止できません（確認画面は表示します）: {error}");
+	}
+	if let Err(error) = show_close_confirmation(&app_handle) {
+		process_state.confirming_close.store(false, Ordering::SeqCst);
+		let _ = resume_current_game(process_state.inner());
+		let _ = show_normal_overlay(&app_handle);
+		return Err(format!("ゲーム終了確認を表示できません: {error}"));
+	}
 	Ok(())
 }
 
@@ -156,6 +183,7 @@ pub fn close_game(
 ) -> Result<(), String>
 {
 	process_state.confirming_close.store(false, Ordering::SeqCst);
+	process_state.game_suspended.store(false, Ordering::SeqCst);
 	let result = terminate_current_game(process_state.inner());
 	hide_overlay(&app_handle);
 	result
@@ -167,15 +195,15 @@ pub fn cancel_close_game(
 	process_state: State<'_, GameProcessState>,
 ) -> Result<(), String>
 {
+	resume_current_game(process_state.inner())?;
 	process_state.confirming_close.store(false, Ordering::SeqCst);
 	let overlay = app_handle
 		.get_webview_window("game-overlay")
 		.ok_or_else(|| "ゲーム終了オーバーレイが見つかりません".to_string())?;
-	overlay.eval("window.hideCloseConfirmation?.()")
+	overlay.eval("document.body.classList.add('is-positioning'); window.hideCloseConfirmation?.()")
 		.map_err(|error| error.to_string())?;
-	overlay.set_ignore_cursor_events(true).map_err(|error| error.to_string())?;
-	force_overlay_to_front(&app_handle)?;
-	show_prepared_overlay(&app_handle)
+	show_normal_overlay(&app_handle)?;
+	focus_current_game(process_state.inner())
 }
 
 pub fn begin_shutdown(app_handle: AppHandle)
@@ -202,8 +230,7 @@ fn show_overlay(app_handle: &AppHandle) -> Result<(), String>
 	overlay
 		.set_always_on_top(true)
 		.map_err(|e| format!("ゲーム終了オーバーレイを準備できません: {e}"))?;
-	force_overlay_to_front(app_handle)?;
-	show_prepared_overlay(app_handle)
+	show_normal_overlay(app_handle)
 }
 
 pub fn prepare_overlay(app_handle: &AppHandle) -> Result<(), String>
@@ -255,7 +282,7 @@ fn overlay_geometry(app_handle: &AppHandle) -> Result<OverlayGeometry, String>
 fn hide_overlay(app_handle: &AppHandle)
 {
 	if let Some(overlay) = app_handle.get_webview_window("game-overlay") {
-		let _ = overlay.eval("window.hideCloseConfirmation?.(); document.getElementById('close-game')?.classList.remove('is-hovered', 'is-pressed')");
+		let _ = overlay.eval("clearTimeout(window.__overlayReadyTimer); window.__overlayReadyTimer = null; window.hideCloseConfirmation?.(); document.body.classList.remove('is-positioning', 'overlay-ready'); document.getElementById('close-game')?.classList.remove('is-hovered', 'is-pressed')");
 		let _ = overlay.set_ignore_cursor_events(true);
 		if let Ok(hwnd) = overlay.hwnd() {
 			use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
@@ -268,7 +295,7 @@ fn hide_overlay(app_handle: &AppHandle)
 fn hide_overlay(app_handle: &AppHandle)
 {
 	if let Some(overlay) = app_handle.get_webview_window("game-overlay") {
-		let _ = overlay.eval("window.hideCloseConfirmation?.(); document.getElementById('close-game')?.classList.remove('is-hovered', 'is-pressed')");
+		let _ = overlay.eval("clearTimeout(window.__overlayReadyTimer); window.__overlayReadyTimer = null; window.hideCloseConfirmation?.(); document.body.classList.remove('is-positioning', 'overlay-ready'); document.getElementById('close-game')?.classList.remove('is-hovered', 'is-pressed')");
 		let _ = overlay.set_ignore_cursor_events(true);
 		let _ = overlay.hide();
 	}
@@ -290,11 +317,11 @@ fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, pro
 						true
 					}
 					Ok(None) => {
-						// 状態ロックを保持したまま表示を維持する。
-						// close_gameは先に同じ状態をNoneへ変更してから非表示にするため、
-						// 終了後にこの処理が×を再表示する競合は発生しない。
-						let _ = force_overlay_to_front(&app_handle);
-						let _ = show_prepared_overlay(&app_handle);
+						// 確認画面の表示中に通常表示へ戻すと、入力を受け付けない
+						// 透明オーバーレイだけが残る。通常時のみ最前面を維持する。
+						if !process_state.confirming_close.load(Ordering::SeqCst) {
+							let _ = position_normal_overlay(&app_handle);
+						}
 						false
 					}
 					Err(_) => {
@@ -305,6 +332,7 @@ fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, pro
 			};
 			if finished {
 				process_state.confirming_close.store(false, Ordering::SeqCst);
+				process_state.game_suspended.store(false, Ordering::SeqCst);
 				if let Ok(mut active) = process_state.active_game.lock()
 				{
 					if active.as_ref().is_some_and(|(id, _)| *id == process_id) { *active = None; }
@@ -317,101 +345,35 @@ fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, pro
 }
 
 #[cfg(target_os = "windows")]
-fn monitor_overlay_input(app_handle: AppHandle, process_state: GameProcessState, process_id: u32)
-{
-	tauri::async_runtime::spawn(async move {
-		let mut was_pressed = false;
-		let mut was_hovered = false;
-		let mut was_visually_pressed = false;
-		let Ok(geometry) = overlay_geometry(&app_handle) else { return; };
-		loop {
-			tokio::time::sleep(std::time::Duration::from_millis(16)).await;
-			if process_state.shutting_down.load(Ordering::SeqCst) { return; }
-			if process_state.confirming_close.load(Ordering::SeqCst) {
-				was_pressed = left_mouse_button_pressed();
-				continue;
-			}
-			let running = process_state
-				.child
-				.lock()
-				.ok()
-				.and_then(|guard| guard.as_ref().map(|child| child.id() == process_id))
-				.unwrap_or(false);
-			let Some(overlay) = app_handle.get_webview_window("game-overlay") else { return; };
-			if !running {
-				return;
-			}
-			let pressed = left_mouse_button_pressed();
-			let hovered = cursor_over_close_button(&geometry).unwrap_or(false);
-			if hovered != was_hovered {
-				let _ = overlay.eval(&format!(
-					"document.getElementById('close-game')?.classList.toggle('is-hovered', {hovered})"
-				));
-				was_hovered = hovered;
-			}
-			let visually_pressed = hovered && pressed;
-			if visually_pressed != was_visually_pressed {
-				let _ = overlay.eval(&format!(
-					"document.getElementById('close-game')?.classList.toggle('is-pressed', {visually_pressed})"
-				));
-				was_visually_pressed = visually_pressed;
-			}
-			if pressed && !was_pressed && hovered {
-				let _ = overlay.eval(
-					"document.getElementById('close-game')?.classList.remove('is-pressed')"
-				);
-				process_state.confirming_close.store(true, Ordering::SeqCst);
-				if let Err(error) = show_close_confirmation(&app_handle) {
-					process_state.confirming_close.store(false, Ordering::SeqCst);
-					let _ = overlay.eval("window.hideCloseConfirmation?.()");
-					let _ = overlay.set_ignore_cursor_events(true);
-					eprintln!("ゲーム終了確認を表示できません: {error}");
-				}
-				was_visually_pressed = false;
-				continue;
-			}
-			was_pressed = pressed;
-		}
-	});
-}
-
-#[cfg(target_os = "windows")]
 fn show_close_confirmation(app_handle: &AppHandle) -> Result<(), String>
 {
 	let overlay = app_handle
 		.get_webview_window("game-overlay")
 		.ok_or_else(|| "ゲーム終了オーバーレイが見つかりません".to_string())?;
-	overlay.eval("window.showCloseConfirmation?.()")
+	overlay.eval("clearTimeout(window.__overlayReadyTimer); window.__overlayReadyTimer = null; document.body.classList.add('is-positioning'); document.body.classList.remove('is-compact', 'overlay-ready')")
 		.map_err(|error| error.to_string())?;
 	overlay.set_ignore_cursor_events(false).map_err(|error| error.to_string())?;
 	force_overlay_to_front(app_handle)?;
 	show_prepared_overlay(app_handle)?;
-	overlay.set_focus().map_err(|error| error.to_string())
+	overlay.set_focus().map_err(|error| error.to_string())?;
+	overlay.eval("requestAnimationFrame(() => requestAnimationFrame(() => window.showCloseConfirmation?.()))")
+		.map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
-fn monitor_overlay_input(_app_handle: AppHandle, _process_state: GameProcessState, _process_id: u32) {}
-
-#[cfg(target_os = "windows")]
-fn cursor_over_close_button(geometry: &OverlayGeometry) -> Result<bool, String>
+fn show_close_confirmation(app_handle: &AppHandle) -> Result<(), String>
 {
-	use windows::Win32::Foundation::POINT;
-	use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
-	let mut point = POINT::default();
-	unsafe { GetCursorPos(&mut point) }.map_err(|e| e.to_string())?;
-	Ok(
-		point.x >= geometry.close_left
-			&& point.x <= geometry.close_right
-			&& point.y >= geometry.close_top
-			&& point.y <= geometry.close_bottom
-	)
-}
-
-#[cfg(target_os = "windows")]
-fn left_mouse_button_pressed() -> bool
-{
-	use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
-	unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 }
+	let overlay = app_handle
+		.get_webview_window("game-overlay")
+		.ok_or_else(|| "ゲーム終了オーバーレイが見つかりません".to_string())?;
+	overlay.eval("document.body.classList.add('is-positioning'); document.body.classList.remove('is-compact', 'overlay-ready')")
+		.map_err(|error| error.to_string())?;
+	force_overlay_to_front(app_handle)?;
+	overlay.set_ignore_cursor_events(false).map_err(|error| error.to_string())?;
+	show_prepared_overlay(app_handle)?;
+	overlay.set_focus().map_err(|error| error.to_string())?;
+	overlay.eval("requestAnimationFrame(() => requestAnimationFrame(() => window.showCloseConfirmation?.()))")
+		.map_err(|error| error.to_string())
 }
 
 fn is_unity_game(executable: &std::path::Path, game_directory: &std::path::Path) -> bool
@@ -450,6 +412,57 @@ fn force_overlay_to_front(app_handle: &AppHandle) -> Result<(), String>
 }
 
 #[cfg(target_os = "windows")]
+fn show_normal_overlay(app_handle: &AppHandle) -> Result<(), String>
+{
+	let overlay = app_handle
+		.get_webview_window("game-overlay")
+		.ok_or_else(|| "ゲーム終了オーバーレイが見つかりません".to_string())?;
+	overlay.eval("clearTimeout(window.__overlayReadyTimer); window.__overlayReadyTimer = null; document.body.classList.remove('overlay-ready'); document.body.classList.add('is-positioning', 'is-compact'); window.hideCloseConfirmation?.()")
+		.map_err(|error| error.to_string())?;
+	position_normal_overlay(app_handle)?;
+	// 通常時のネイティブウィンドウは×と同じ大きさなので、
+	// 入力透過を切り替えずに×だけがクリックを受け取れる。
+	overlay.set_ignore_cursor_events(false).map_err(|error| error.to_string())?;
+	show_prepared_overlay(app_handle)?;
+	// 初回のShowWindowでTauri側が生成時の座標を一度復元する場合があるため、
+	// 表示後にも右上座標を確定してから×の描画を許可する。
+	position_normal_overlay(app_handle)?;
+	// Tauriが初回表示直後に生成時の中央座標を復元するため、位置維持処理が
+	// 右上を再確定するまで描画を許可しない。
+	overlay.eval("window.__overlayReadyTimer = setTimeout(() => { document.body.classList.remove('is-positioning'); document.body.classList.add('overlay-ready'); window.__overlayReadyTimer = null; }, 320)")
+		.map_err(|error| error.to_string())?;
+	Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn position_normal_overlay(app_handle: &AppHandle) -> Result<(), String>
+{
+	use windows::Win32::UI::WindowsAndMessaging::{
+		SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
+	};
+
+	let overlay = app_handle
+		.get_webview_window("game-overlay")
+		.ok_or_else(|| "ゲーム終了オーバーレイが見つかりません".to_string())?;
+	let hwnd = overlay.hwnd().map_err(|error| error.to_string())?;
+	let geometry = overlay_geometry(app_handle)?;
+	let width = (geometry.close_right - geometry.close_left).max(1);
+	let height = (geometry.close_bottom - geometry.close_top).max(1);
+	unsafe {
+		SetWindowPos(
+			hwnd,
+			Some(HWND_TOPMOST),
+			geometry.close_left,
+			geometry.close_top,
+			width,
+			height,
+			SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+		)
+	}
+	.map_err(|error| format!("終了ボタンを配置できません: {error}"))
+}
+
+#[cfg(target_os = "windows")]
 fn show_prepared_overlay(app_handle: &AppHandle) -> Result<(), String>
 {
 	use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
@@ -476,6 +489,25 @@ fn force_overlay_to_front(app_handle: &AppHandle) -> Result<(), String>
 }
 
 #[cfg(not(target_os = "windows"))]
+fn show_normal_overlay(app_handle: &AppHandle) -> Result<(), String>
+{
+	let overlay = app_handle
+		.get_webview_window("game-overlay")
+		.ok_or_else(|| "ゲーム終了オーバーレイが見つかりません".to_string())?;
+	let geometry = overlay_geometry(app_handle)?;
+	overlay
+		.set_size(PhysicalSize::new(
+			(geometry.close_right - geometry.close_left).max(1) as u32,
+			(geometry.close_bottom - geometry.close_top).max(1) as u32,
+		))
+		.and_then(|_| overlay.set_position(PhysicalPosition::new(geometry.close_left, geometry.close_top)))
+		.and_then(|_| overlay.set_always_on_top(true))
+		.and_then(|_| overlay.set_ignore_cursor_events(false))
+		.map_err(|e| e.to_string())?;
+	show_prepared_overlay(app_handle)
+}
+
+#[cfg(not(target_os = "windows"))]
 fn show_prepared_overlay(app_handle: &AppHandle) -> Result<(), String>
 {
 	let overlay = app_handle
@@ -484,8 +516,148 @@ fn show_prepared_overlay(app_handle: &AppHandle) -> Result<(), String>
 	overlay.show().map_err(|e| e.to_string())
 }
 
+fn current_process_id(process_state: &GameProcessState) -> Result<Option<u32>, String>
+{
+	process_state.child
+		.lock()
+		.map(|child| child.as_ref().map(Child::id))
+		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())
+}
+
+fn suspend_current_game(process_state: &GameProcessState) -> Result<(), String>
+{
+	if process_state.game_suspended.load(Ordering::SeqCst) { return Ok(()); }
+	let Some(process_id) = current_process_id(process_state)? else { return Ok(()); };
+	set_process_suspended(process_id, true)?;
+	process_state.game_suspended.store(true, Ordering::SeqCst);
+	Ok(())
+}
+
+fn resume_current_game(process_state: &GameProcessState) -> Result<(), String>
+{
+	if !process_state.game_suspended.load(Ordering::SeqCst) { return Ok(()); }
+	let Some(process_id) = current_process_id(process_state)? else {
+		process_state.game_suspended.store(false, Ordering::SeqCst);
+		return Ok(());
+	};
+	set_process_suspended(process_id, false)?;
+	process_state.game_suspended.store(false, Ordering::SeqCst);
+	Ok(())
+}
+
+fn focus_current_game(process_state: &GameProcessState) -> Result<(), String>
+{
+	let Some(process_id) = current_process_id(process_state)? else { return Ok(()); };
+	focus_process_window(process_id)
+}
+
+#[cfg(target_os = "windows")]
+fn focus_process_window(process_id: u32) -> Result<(), String>
+{
+	use windows::core::BOOL;
+	use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+	use windows::Win32::UI::WindowsAndMessaging::{
+		EnumWindows, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+		SetForegroundWindow, ShowWindow, SW_RESTORE,
+	};
+
+	struct WindowCandidate
+	{
+		process_id: u32,
+		hwnd: Option<HWND>,
+		area: i64,
+	}
+
+	unsafe extern "system" fn find_window(hwnd: HWND, lparam: LPARAM) -> BOOL
+	{
+		let candidate = unsafe { &mut *(lparam.0 as *mut WindowCandidate) };
+		if !unsafe { IsWindowVisible(hwnd) }.as_bool() { return BOOL(1); }
+		let mut owner_process_id = 0u32;
+		unsafe { GetWindowThreadProcessId(hwnd, Some(&mut owner_process_id)) };
+		if owner_process_id != candidate.process_id { return BOOL(1); }
+		let mut rect = RECT::default();
+		if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok()
+		{
+			let area = i64::from((rect.right - rect.left).max(0))
+				* i64::from((rect.bottom - rect.top).max(0));
+			if area > candidate.area {
+				candidate.area = area;
+				candidate.hwnd = Some(hwnd);
+			}
+		}
+		BOOL(1)
+	}
+
+	let mut candidate = WindowCandidate { process_id, hwnd: None, area: 0 };
+	unsafe { EnumWindows(Some(find_window), LPARAM((&mut candidate as *mut WindowCandidate) as isize)) }
+		.map_err(|error| format!("ゲームウィンドウを検索できません: {error}"))?;
+	let hwnd = candidate.hwnd.ok_or_else(|| "ゲームウィンドウが見つかりません".to_string())?;
+	if unsafe { IsIconic(hwnd) }.as_bool() {
+		unsafe { let _ = ShowWindow(hwnd, SW_RESTORE); }
+	}
+	if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
+		return Err("ゲームウィンドウへフォーカスを戻せません".to_string());
+	}
+	Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn focus_process_window(_process_id: u32) -> Result<(), String>
+{
+	Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn set_process_suspended(process_id: u32, suspended: bool) -> Result<(), String>
+{
+	use windows::Win32::Foundation::CloseHandle;
+	use windows::Win32::System::Diagnostics::ToolHelp::{
+		CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+	};
+	use windows::Win32::System::Threading::{
+		OpenThread, ResumeThread, SuspendThread, THREAD_SUSPEND_RESUME,
+	};
+
+	let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }
+		.map_err(|error| format!("ゲームのスレッド一覧を取得できません: {error}"))?;
+	let mut entry = THREADENTRY32 {
+		dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+		..Default::default()
+	};
+	let mut changed_threads = 0usize;
+	let mut next = unsafe { Thread32First(snapshot, &mut entry) };
+	while next.is_ok()
+	{
+		if entry.th32OwnerProcessID == process_id
+		{
+			if let Ok(thread) = unsafe { OpenThread(THREAD_SUSPEND_RESUME, false, entry.th32ThreadID) }
+			{
+				let previous_count = unsafe {
+					if suspended { SuspendThread(thread) } else { ResumeThread(thread) }
+				};
+				if previous_count != u32::MAX { changed_threads += 1; }
+				let _ = unsafe { CloseHandle(thread) };
+			}
+		}
+		next = unsafe { Thread32Next(snapshot, &mut entry) };
+	}
+	let _ = unsafe { CloseHandle(snapshot) };
+	if changed_threads == 0 {
+		return Err("ゲームの実行スレッドを一時停止・再開できません".to_string());
+	}
+	Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_process_suspended(_process_id: u32, _suspended: bool) -> Result<(), String>
+{
+	// 現在サポート対象のWindows以外では確認画面のみ表示する。
+	Ok(())
+}
+
 fn terminate_current_game(process_state: &GameProcessState) -> Result<(), String>
 {
+	process_state.game_suspended.store(false, Ordering::SeqCst);
 	let mut child = process_state
 		.child
 		.lock()

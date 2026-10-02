@@ -3,7 +3,7 @@ import { filterAndRenderGames } from "../games/filterGames.js";
 import { loadGames, refreshGameCard } from "../games/loadGames.js";
 import { openModal, closeModal } from "../ui/modal.js";
 import { setLogText } from "../ui/log.js";
-import { findGameById, getSelectedGame, setGameDownloadProgress, setGameUpdateFlag, getAllGames, removeGameById } from "../core/state.js";
+import { findGameById, getSelectedGame, setSelectedGame, setGameDownloadProgress, setGameUpdateFlag, getAllGames, removeGameById } from "../core/state.js";
 import { launchGame } from "../games/launchGame.js";
 import { renderGames, updateGameCardDownloadUi } from "../games/renderGames.js";
 import { submitComment } from "../comments/comments.js";
@@ -88,6 +88,7 @@ export function setupEventListeners() {
 
 	document.getElementById("btn-close-modal")?.addEventListener("click", () => closeModal("detail-modal"));
 	document.getElementById("modal-backdrop")?.addEventListener("click", () => closeModal("detail-modal"));
+	document.getElementById("detail-modal")?.addEventListener("modal:closed", () => setSelectedGame(null));
 	document.getElementById("tab-comments")?.addEventListener("click", () => setCommunityTab("comments"));
 	document.getElementById("tab-ranking")?.addEventListener("click", () => setCommunityTab("ranking"));
 	document.getElementById("btn-jump-ranking")?.addEventListener("click", () => {

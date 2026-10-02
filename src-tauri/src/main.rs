@@ -24,21 +24,36 @@ async fn main()
 			.map_err(std::io::Error::other)?;
 		let process_state = app.state::<commands::launch::GameProcessState>().inner().clone();
 		tauri::async_runtime::spawn(commands::leaderboards::serve_local_api(process_state));
+		// 常駐する非表示オーバーレイを含む初期化が完了してからメイン窓を見せる。
+		// 起動途中の最小化でメイン窓だけが失われる競合を防ぐ。
+		let main_window = app
+			.get_webview_window("main")
+			.ok_or_else(|| std::io::Error::other("メインウィンドウが見つかりません"))?;
+		main_window.show().map_err(std::io::Error::other)?;
+		main_window.set_focus().map_err(std::io::Error::other)?;
 		Ok(())
 	})
 	.on_window_event(|window, event| {
 		if window.label() == "main"
 		{
-			if let tauri::WindowEvent::CloseRequested { api, .. } = event
-			{
-				api.prevent_close();
-				commands::launch::begin_shutdown(window.app_handle().clone());
+			match event {
+				tauri::WindowEvent::CloseRequested { api, .. } => {
+					api.prevent_close();
+					commands::launch::begin_shutdown(window.app_handle().clone());
+				}
+				// メイン窓だけが予期せず破棄されても、非表示のオーバーレイ窓を
+				// 残してプロセスを常駐させない。
+				tauri::WindowEvent::Destroyed => {
+					commands::launch::begin_shutdown(window.app_handle().clone());
+				}
+				_ => {}
 			}
 		}
 	})
 	.invoke_handler(tauri::generate_handler![
 		commands::launch::launch,
 		commands::launch::is_game_running,
+		commands::launch::request_close_game,
 		commands::launch::close_game,
 		commands::launch::cancel_close_game,
 		commands::refresh::refresh,

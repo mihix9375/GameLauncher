@@ -1,12 +1,9 @@
 import { invoke } from "../core/tauri.js";
 import { getSelectedGame } from "../core/state.js";
 import { setLogText } from "../ui/log.js";
+import { gameId as getGameId } from "../core/gameIdentity.js";
 
 let loadSequence = 0;
-
-function getGameId(game) {
-	return (game?.id || game?.game || "").replace(/\.exe$/i, "");
-}
 
 function formatDate(unixSeconds) {
 	const date = new Date(Number(unixSeconds) * 1000);

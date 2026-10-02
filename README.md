@@ -55,7 +55,13 @@ UnityゲームはGameServerへ直接接続しません。ServerのIPアドレス
 3. 設定画面でServer URL、ランキングServer API、ゲーム保存先を設定します。
 4. 一覧からゲームを選び、インストールまたは起動します。
 
+未ダウンロードのゲームもServerからゲーム情報を取得し、カードと詳細画面にタイトルを表示します。この情報取得でゲーム本体はダウンロードされません。接続先は設定したランキングServer APIです。
+
 設定は `%APPDATA%\gamelauncher\config.json` に保存されます。ゲーム保存先を空欄にした場合は `%APPDATA%\gamelauncher\games` を使用します。
+
+ゲームの説明は空行を含む改行に対応しています。Server管理画面の説明欄ではEnterで改行し、`meta.json`を直接編集する場合は`"description": "ゲームの説明\n\n操作方法\nWASD: 移動"`のように`\n`を使ってください。Launcherの詳細画面では、その改行と空行を保って表示します。
+
+説明はMarkdownでも記述できます。見出し、太字、箇条書き、表、引用、コード、リンクを表示できます。`"description": "README.md"`と指定すると、`meta.json`と同じ階層にあるUTF-8のMDファイルを読み込みます。ファイルは1 MiB以内で、ゲームZIPに含めてください。画像はHTTPS URLに対応し、HTMLタグは文字として表示します。
 
 ## ゲーム更新
 

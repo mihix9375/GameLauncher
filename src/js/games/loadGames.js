@@ -3,16 +3,12 @@ import { findGameById, getAllGames, setAllGames } from "../core/state.js";
 import { renderGames } from "./renderGames.js";
 import { updateGameCount } from "../ui/counter.js";
 import { setLogText } from "../ui/log.js";
+import { gameId, canonicalGameId } from "../core/gameIdentity.js";
 
 let latestLoadRequest = 0;
 
-function canonicalGameId(game) {
-	return String(game?.id || game?.game || "").replace(/\.exe$/i, "").toLocaleLowerCase();
-}
-
 function normalizeGame(game) {
-	if (game.id && game.id.endsWith(".exe")) game.id = game.id.replace(/\.exe$/i, "");
-	if (!game.id && game.game) game.id = game.game.replace(/\.exe$/i, "");
+	game.id = gameId(game);
 	if (!game.game && game.id) game.game = `${game.id}.exe`;
 	if (!game.image && game.titleImage) game.image = game.titleImage;
 	if (!game.titleImage && game.image) game.titleImage = game.image;
@@ -21,7 +17,7 @@ function normalizeGame(game) {
 	return game;
 }
 
-function sortGames(games) {
+export function sortGames(games) {
 	return games.sort((left, right) => {
 		const titleOrder = String(left.title || left.id || "").localeCompare(
 			String(right.title || right.id || ""),
@@ -80,9 +76,9 @@ export async function loadGames() {
 		allGames.forEach(normalizeGame);
 
 		// refreshはローカルゲームだけを返すため、Serverから通知された未導入カードを維持する。
-		const localIds = new Set(allGames.map(game => String(game.id || game.game || "").replace(/\.exe$/i, "").toLocaleLowerCase()));
+		const localIds = new Set(allGames.map(canonicalGameId));
 		for (const remoteGame of getAllGames().filter(game => game.isInstalled === false)) {
-			const remoteId = String(remoteGame.id || remoteGame.game || "").replace(/\.exe$/i, "").toLocaleLowerCase();
+			const remoteId = canonicalGameId(remoteGame);
 			if (remoteId && !localIds.has(remoteId)) allGames.push(remoteGame);
 		}
 

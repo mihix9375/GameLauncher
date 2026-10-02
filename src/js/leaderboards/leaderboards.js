@@ -1,13 +1,10 @@
 import { invoke } from "../core/tauri.js";
 import { setCommunityTab } from "../ui/communityTabs.js";
+import { gameId } from "../core/gameIdentity.js";
 
 let requestNumber = 0;
 let refreshTimer = null;
 const RefreshIntervalMilliseconds = 5000;
-
-function gameId(game) {
-	return (game.id || game.game || "").replace(/\.exe$/i, "");
-}
 
 function renderBoard(board) {
 	const card = document.createElement("article");

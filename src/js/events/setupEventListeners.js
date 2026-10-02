@@ -1,18 +1,44 @@
 import { invoke } from "../core/tauri.js";
 import { filterAndRenderGames } from "../games/filterGames.js";
-import { loadGames, refreshGameCard } from "../games/loadGames.js";
+import { loadGames, refreshGameCard, sortGames } from "../games/loadGames.js";
 import { openModal, closeModal } from "../ui/modal.js";
 import { setLogText } from "../ui/log.js";
-import { findGameById, getSelectedGame, setSelectedGame, setGameDownloadProgress, setGameUpdateFlag, getAllGames, removeGameById } from "../core/state.js";
+import { findGameById, getSelectedGame, setSelectedGame, setGameDownloadProgress, setGameUpdateFlag, getAllGames, removeGameById, applyRemoteGameMetadata } from "../core/state.js";
 import { launchGame } from "../games/launchGame.js";
 import { renderGames, updateGameCardDownloadUi } from "../games/renderGames.js";
 import { submitComment } from "../comments/comments.js";
 import { setCommunityTab } from "../ui/communityTabs.js";
 import { updateGameCount } from "../ui/counter.js";
 import { formatError } from "../core/errors.js";
-import { updateDetailDownloadUi } from "../modals/detailModal.js";
+import { updateDetailDownloadUi, updateDetailMetadataUi } from "../modals/detailModal.js";
+import { gameId } from "../core/gameIdentity.js";
+import { startGameSessionMonitoring } from "../games/gameSession.js";
+
+const pendingMetadata = new Map();
+
+function refreshRemoteMetadata(gameId) {
+	if (pendingMetadata.has(gameId)) return pendingMetadata.get(gameId);
+	const request = invoke("get_game_metadata", { gameId }).then(metadata => {
+		const game = applyRemoteGameMetadata(gameId, metadata);
+		if (!game) return;
+		sortGames(getAllGames());
+		filterAndRenderGames(document.getElementById("search-input")?.value || "");
+		updateDetailMetadataUi(game);
+	}).catch(error => {
+		const game = findGameById(gameId);
+		if (game?.isInstalled === false && game.title === "ゲーム情報を取得中…") {
+			game.title = "ゲーム情報を取得できませんでした";
+			filterAndRenderGames(document.getElementById("search-input")?.value || "");
+			updateDetailMetadataUi(game);
+		}
+		console.warn("ゲーム情報の取得に失敗しました:", error);
+	}).finally(() => pendingMetadata.delete(gameId));
+	pendingMetadata.set(gameId, request);
+	return request;
+}
 
 export function setupEventListeners() {
+	startGameSessionMonitoring();
 	let requestDownloadAll = () => {};
 	const searchInput = document.getElementById("search-input");
 	if (searchInput) {
@@ -242,7 +268,7 @@ export function setupEventListeners() {
 		const updateListener = window.__TAURI__.event.listen("update_notice", async (event) => {
 			const payload = event.payload;
 			if (payload && payload.game_id) {
-				const cleanId = payload.game_id.replace(".exe", "");
+				const cleanId = gameId(payload.game_id);
 				noteDownloadAllNotice();
 				removedGameIds.delete(cleanId);
 				const existing = findGameById(cleanId);
@@ -250,6 +276,7 @@ export function setupEventListeners() {
 				if (!existing || !existing.isInstalled || existing.version !== payload.version || existing.hasUpdate) {
 					setGameUpdateFlag(cleanId, payload.version);
 					renderGames(getAllGames());
+					if (!isInstalled) void refreshRemoteMetadata(cleanId);
 					if (isInstalled || downloadAllRequested) {
 						enqueueDownload(payload.game_id, payload.version, cleanId);
 					} else {
@@ -274,7 +301,7 @@ export function setupEventListeners() {
 		const deleteListener = window.__TAURI__.event.listen("game_delete_notice", async (event) => {
 			const payload = event.payload;
 			if (!payload?.game_id) return;
-			const cleanId = payload.game_id.replace(".exe", "");
+			const cleanId = gameId(payload.game_id);
 			removedGameIds.add(cleanId);
 			pendingGameIds.delete(cleanId);
 			if (payload.error) {
@@ -283,7 +310,7 @@ export function setupEventListeners() {
 				return;
 			}
 			const selectedGame = getSelectedGame();
-			const selectedId = (selectedGame?.id || selectedGame?.game || "").replace(/\.exe$/i, "");
+			const selectedId = gameId(selectedGame);
 			removeGameById(cleanId);
 			renderGames(getAllGames());
 			updateGameCount(getAllGames().length);

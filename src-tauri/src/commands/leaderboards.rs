@@ -1,16 +1,14 @@
-use std::time::Duration;
-
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use reqwest::{Client, Url};
+use reqwest::Url;
+use crate::server_api;
 use serde::{Deserialize, Serialize};
 
 const LOCAL_API_BIND: &str = "127.0.0.1:50053";
 const LIST_ROUTE: &str = "/v1/leaderboards";
 const SUBMIT_ROUTE: &str = "/v1/leaderboards/{board_id}/scores";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_BOARD_ID_LENGTH: usize = 32;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -114,31 +112,13 @@ fn unauthorized() -> (StatusCode, Json<ProxyError>)
 
 fn default_enabled() -> bool { true }
 
-fn server_client() -> Result<Client, String>
-{
-	Client::builder()
-		.timeout(REQUEST_TIMEOUT)
-		.build()
-		.map_err(|error| format!("ランキング用HTTPクライアントを作成できません: {error}"))
-}
-
 fn server_endpoint(game_id: &str, board_id: Option<&str>) -> Result<Url, String>
 {
-	let config = crate::env::get_config();
-	let base_url = crate::env::normalize_leaderboard_url(&config.leaderboard_url);
-	let mut url = Url::parse(&base_url)
-		.map_err(|error| format!("ランキングAPIのURLが不正です: {error}"))?;
-	let mut path = url.path_segments_mut()
-		.map_err(|_| "ランキングAPIのURLが不正です".to_string())?;
-
-	path.pop_if_empty()
-		.extend(["v1", "games", game_id, "leaderboards"]);
-	if let Some(board_id) = board_id
+	match board_id
 	{
-		path.extend([board_id, "scores"]);
+		Some(board_id) => server_api::game_endpoint(game_id, &["leaderboards", board_id, "scores"]),
+		None => server_api::game_endpoint(game_id, &["leaderboards"]),
 	}
-	drop(path);
-	Ok(url)
 }
 
 fn validate_board_id(board_id: &str) -> Result<(), String>
@@ -154,7 +134,7 @@ fn validate_board_id(board_id: &str) -> Result<(), String>
 async fn fetch_from_server(game_id: &str) -> Result<LeaderboardListResponse, String>
 {
 	let game_id = crate::env::normalize_game_id(game_id)?;
-	let response = server_client()?
+	let response = server_api::client()?
 		.get(server_endpoint(&game_id, None)?)
 		.send()
 		.await
@@ -184,7 +164,7 @@ async fn submit_to_server(
 	let game_id = crate::env::normalize_game_id(game_id)?;
 	validate_board_id(board_id)?;
 
-	let response = server_client()?
+	let response = server_api::client()?
 		.post(server_endpoint(&game_id, Some(board_id))?)
 		.json(&submission)
 		.send()
@@ -210,7 +190,7 @@ async fn sync_with_server(
 ) -> Result<LeaderboardListResponse, String>
 {
 	let game_id = crate::env::normalize_game_id(game_id)?;
-	let response = server_client()?
+	let response = server_api::client()?
 		.put(server_endpoint(&game_id, None)?)
 		.json(&request)
 		.send()

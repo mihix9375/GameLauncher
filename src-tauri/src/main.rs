@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod env;
+mod description;
+mod server_api;
 mod commands;
 mod wait_update;
 
@@ -53,10 +55,12 @@ async fn main()
 	.invoke_handler(tauri::generate_handler![
 		commands::launch::launch,
 		commands::launch::is_game_running,
+		commands::launch::get_running_game_id,
 		commands::launch::request_close_game,
 		commands::launch::close_game,
 		commands::launch::cancel_close_game,
 		commands::refresh::refresh,
+		commands::catalog::get_game_metadata,
 		commands::check_version::check_version,
 		commands::download_game::download_game,
 		commands::sync_updates::sync_updates,

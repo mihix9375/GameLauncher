@@ -5,6 +5,8 @@ import { getAllGames, setGameDownloadProgress } from "../core/state.js";
 import { renderGames } from "./renderGames.js";
 import { updateDetailDownloadUi } from "../modals/detailModal.js";
 import { refreshGameCard } from "./loadGames.js";
+import { gameId } from "../core/gameIdentity.js";
+import { refreshGameSession } from "./gameSession.js";
 
 let launchRequestInProgress = false;
 
@@ -34,7 +36,7 @@ export async function launchGame(game) {
 		}
 
 		if (window.__TAURI__) {
-			const targetId = (game.id || game.game || "").replace(".exe", "");
+			const targetId = gameId(game);
 			let needsDownload = game.isInstalled === false ? true : game._needsUpdate;
 			if (needsDownload === undefined) {
 				try {
@@ -82,6 +84,7 @@ export async function launchGame(game) {
 
 			setLogText(`${game.title} を起動中...`);
 			await invoke("launch", { gameId: targetId });
+			await refreshGameSession();
 		} else {
 			await new Promise(resolve => setTimeout(resolve, 1200));
 			alert(`[テストモード] ゲーム「${game.title}」を起動しました！`);

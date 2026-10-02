@@ -52,6 +52,21 @@ impl GameProcessState
 }
 
 #[tauri::command]
+pub fn get_running_game_id(process_state: State<'_, GameProcessState>) -> Result<Option<String>, String>
+{
+	let mut child = process_state.child.lock()
+		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?;
+	let Some(process) = child.as_mut() else { return Ok(None); };
+	if process.try_wait().map_err(|error| format!("ゲームプロセスの確認に失敗しました: {error}"))?.is_some() {
+		// 終了処理とオーバーレイの片付けは既存の監視タスクに任せる。
+		return Ok(None);
+	}
+	let active = process_state.active_game.lock()
+		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?;
+	Ok(active.as_ref().filter(|game| game.process_id == process.id()).map(|game| game.game_id.clone()))
+}
+
+#[tauri::command]
 pub fn is_game_running(process_state: State<'_, GameProcessState>) -> Result<bool, String>
 {
 	let mut child = process_state.child.lock()

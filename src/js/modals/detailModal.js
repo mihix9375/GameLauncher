@@ -1,11 +1,14 @@
 import { invoke } from "../core/tauri.js";
-import { getSelectedGame, setSelectedGame } from "../core/state.js";
+import { getSelectedGame, setSelectedGame, isGameRunning } from "../core/state.js";
 import { openModal } from "../ui/modal.js";
 import { setLogText } from "../ui/log.js";
 import { loadComments } from "../comments/comments.js";
 import { loadLeaderboards, startLeaderboardAutoRefresh } from "../leaderboards/leaderboards.js";
 import { setCommunityTab } from "../ui/communityTabs.js";
 import { setupScrollHint } from "../ui/scrollHint.js";
+import { renderMarkdown } from "../ui/markdown.js";
+import { gameId, canonicalGameId } from "../core/gameIdentity.js";
+import { downloadProgress, updateProgressBar } from "../ui/downloadProgress.js";
 
 function updateBannerImageMode(banner, image, backdrop) {
 	if (!image.naturalWidth || !image.naturalHeight) return;
@@ -65,10 +68,6 @@ function updateBannerPalette(banner, image) {
 	}
 }
 
-function canonicalGameId(game) {
-	return String(game?.id || game?.game || "").trim().replace(/\.exe$/i, "").toLocaleLowerCase();
-}
-
 export function updateDetailDownloadUi(game) {
 	if (!game || canonicalGameId(getSelectedGame()) !== canonicalGameId(game)) return;
 	const button = document.getElementById("btn-launch-game");
@@ -76,22 +75,26 @@ export function updateDetailDownloadUi(game) {
 	const progressWrap = document.getElementById("detail-download-progress");
 	const progressBar = document.getElementById("detail-download-progress-bar");
 	const progressLabel = document.getElementById("detail-download-progress-label");
-	const progress = game._downloadProgress;
-	const downloading = Boolean(game._isDownloading && progress);
+	const progress = downloadProgress(game);
 
-	if (downloading) {
-		const measured = progress.total_bytes > 0;
-		const percentage = measured
-			? Math.min(100, Math.round((progress.received_bytes / progress.total_bytes) * 100))
-			: 0;
-		const label = progress.stage === "queued" ? "ダウンロード待機中"
-			: progress.stage === "preparing" ? "準備中"
-			: progress.stage === "extracting" ? "展開中"
-			: progress.stage === "installing" ? "適用中"
-			: `${percentage}% ダウンロード中`;
+	if (isGameRunning(game)) {
+		if (progressWrap) progressWrap.hidden = true;
 		if (button) {
 			button.disabled = true;
-			button.innerHTML = `<span class="btn-icon">⏳</span><span class="btn-text">${label}</span>`;
+			button.innerHTML = `<span class="btn-icon">▶</span><span class="btn-text">起動中</span>`;
+			button.style.opacity = "0.7";
+			button.style.pointerEvents = "none";
+		}
+		if (status) {
+			status.textContent = "ゲームを実行中";
+			status.className = "launch-status ready";
+		}
+		return;
+	}
+	if (progress.downloading) {
+		if (button) {
+			button.disabled = true;
+			button.innerHTML = `<span class="btn-icon">⏳</span><span class="btn-text">${progress.label}</span>`;
 			button.style.opacity = "0.7";
 			button.style.pointerEvents = "none";
 		}
@@ -101,12 +104,9 @@ export function updateDetailDownloadUi(game) {
 		}
 		if (progressWrap) {
 			progressWrap.hidden = false;
-			progressWrap.classList.toggle("indeterminate", !measured);
-			if (measured) progressWrap.setAttribute("aria-valuenow", String(percentage));
-			else progressWrap.removeAttribute("aria-valuenow");
 		}
-		if (progressBar) progressBar.style.width = `${percentage}%`;
-		if (progressLabel) progressLabel.textContent = label;
+		updateProgressBar(progressWrap, progressBar, progress);
+		if (progressLabel) progressLabel.textContent = progress.label;
 		return;
 	}
 
@@ -137,6 +137,28 @@ export function updateDetailDownloadUi(game) {
 	}
 }
 
+export function updateDetailMetadataUi(game) {
+	if (!game || canonicalGameId(getSelectedGame()) !== canonicalGameId(game)) return;
+	const title = game.title || "ゲームタイトル";
+	const titleElement = document.getElementById("modal-title");
+	titleElement.textContent = title;
+	titleElement.classList.toggle("long-title", title.length > 24);
+	titleElement.classList.toggle("very-long-title", title.length > 44);
+	document.getElementById("modal-version").textContent = game.version || "v1.0.0";
+	document.getElementById("modal-author").textContent = game.author || "ゲーム開発研究部";
+	document.getElementById("modal-date").textContent = game.latest_update || game.latestUpdate || game.lastUpdate || "";
+	renderMarkdown(document.getElementById("modal-description"), game.description || "説明文はありません。");
+	const tagContainer = document.getElementById("modal-tags");
+	if (tagContainer && Array.isArray(game.tags)) {
+		tagContainer.replaceChildren(...game.tags.map(text => {
+			const tag = document.createElement("span");
+			tag.className = "tag-pill";
+			tag.textContent = text;
+			return tag;
+		}));
+	}
+}
+
 export async function openDetailModal(game, meta) {
 	setSelectedGame(game);
 	const merged = Object.assign({}, meta || {}, game);
@@ -149,15 +171,7 @@ export async function openDetailModal(game, meta) {
 	});
 	setCommunityTab("comments");
 
-	const title = merged.title || game.title || "ゲームタイトル";
-	const titleElement = document.getElementById("modal-title");
-	titleElement.textContent = title;
-	titleElement.classList.toggle("long-title", title.length > 24);
-	titleElement.classList.toggle("very-long-title", title.length > 44);
-	document.getElementById("modal-version").textContent = merged.version || game.version || "v1.0.0";
-	document.getElementById("modal-author").textContent = merged.author || "ゲーム開発研究部";
-	document.getElementById("modal-date").textContent = merged.latest_update || merged.latestUpdate || merged.lastUpdate || "2026/07/07";
-	document.getElementById("modal-description").textContent = merged.description || "説明文はありません。";
+	updateDetailMetadataUi(merged);
 	updateDetailDownloadUi(game);
 
 	const bannerEl = document.getElementById("modal-banner");
@@ -201,16 +215,6 @@ export async function openDetailModal(game, meta) {
 		}
 	}
 
-	const modalTags = document.getElementById("modal-tags");
-	modalTags.innerHTML = "";
-	const tagsList = (Array.isArray(merged.tags) && merged.tags.length > 0) ? merged.tags : ["ゲーム"];
-	tagsList.forEach(tagText => {
-		const tag = document.createElement("span");
-		tag.className = "tag-pill";
-		tag.textContent = tagText;
-		modalTags.appendChild(tag);
-	});
-
   openModal("detail-modal");
   loadLeaderboards(game);
   startLeaderboardAutoRefresh(game);
@@ -220,7 +224,7 @@ export async function openDetailModal(game, meta) {
 	if (window.__TAURI__) {
 		try {
 			setLogText(`${game.title} の更新をチェック中...`);
-			const res = await invoke("check_version", { version: game.version || "0.0.0", gameId: (game.id || game.game || "").replace(".exe", "") });
+			const res = await invoke("check_version", { version: game.version || "0.0.0", gameId: gameId(game) });
 			const needsInitialDownload = game.isInstalled === false;
 			if (needsInitialDownload || (res && res.is_update_available)) {
 				game._needsUpdate = true;

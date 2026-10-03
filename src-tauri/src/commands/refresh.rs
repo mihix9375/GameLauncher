@@ -38,6 +38,8 @@ pub fn refresh() -> Vec<Meta>
 								meta.id = name.clone();
 							}
 							meta.id = meta.id.trim_end_matches(".exe").to_string();
+							meta.description = crate::description::resolve(&entry.path(), &meta.description)
+								.unwrap_or_else(|error| format!("説明を読み込めませんでした: {error}"));
 							if meta.game.is_empty() {
 								meta.game = format!("{}.exe", meta.id);
 							}

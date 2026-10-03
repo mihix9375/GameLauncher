@@ -1,24 +1,33 @@
-use std::time::Duration;
-
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use reqwest::{Client, Url};
+use reqwest::Url;
+use crate::server_api;
 use serde::{Deserialize, Serialize};
 
 const LOCAL_API_BIND: &str = "127.0.0.1:50053";
 const LIST_ROUTE: &str = "/v1/leaderboards";
 const SUBMIT_ROUTE: &str = "/v1/leaderboards/{board_id}/scores";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_BOARD_ID_LENGTH: usize = 32;
+
+// 旧Serverの整数応答も読み取り、JSへは桁落ちしない文字列で渡す。
+fn score_text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+	#[derive(Deserialize)] #[serde(untagged)] enum Input { Text(String), Signed(i64), Unsigned(u64) }
+	match Input::deserialize(deserializer)? {
+		Input::Text(value) => Ok(value),
+		Input::Signed(value) => Ok(value.to_string()),
+		Input::Unsigned(value) => Ok(value.to_string()),
+	}
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RankedEntry
 {
 	pub rank: usize,
 	pub player_name: String,
-	pub score: i64,
+	#[serde(deserialize_with = "score_text")]
+	pub score: String,
 	pub submitted_at: i64,
 }
 
@@ -64,7 +73,8 @@ struct SyncLeaderboardsRequest
 struct ScoreSubmission
 {
 	player_name: String,
-	score: i64,
+	#[serde(deserialize_with = "score_text")]
+	score: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -114,31 +124,13 @@ fn unauthorized() -> (StatusCode, Json<ProxyError>)
 
 fn default_enabled() -> bool { true }
 
-fn server_client() -> Result<Client, String>
-{
-	Client::builder()
-		.timeout(REQUEST_TIMEOUT)
-		.build()
-		.map_err(|error| format!("ランキング用HTTPクライアントを作成できません: {error}"))
-}
-
 fn server_endpoint(game_id: &str, board_id: Option<&str>) -> Result<Url, String>
 {
-	let config = crate::env::get_config();
-	let base_url = crate::env::normalize_leaderboard_url(&config.leaderboard_url);
-	let mut url = Url::parse(&base_url)
-		.map_err(|error| format!("ランキングAPIのURLが不正です: {error}"))?;
-	let mut path = url.path_segments_mut()
-		.map_err(|_| "ランキングAPIのURLが不正です".to_string())?;
-
-	path.pop_if_empty()
-		.extend(["v1", "games", game_id, "leaderboards"]);
-	if let Some(board_id) = board_id
+	match board_id
 	{
-		path.extend([board_id, "scores"]);
+		Some(board_id) => server_api::game_endpoint(game_id, &["leaderboards", board_id, "scores"]),
+		None => server_api::game_endpoint(game_id, &["leaderboards"]),
 	}
-	drop(path);
-	Ok(url)
 }
 
 fn validate_board_id(board_id: &str) -> Result<(), String>
@@ -154,7 +146,7 @@ fn validate_board_id(board_id: &str) -> Result<(), String>
 async fn fetch_from_server(game_id: &str) -> Result<LeaderboardListResponse, String>
 {
 	let game_id = crate::env::normalize_game_id(game_id)?;
-	let response = server_client()?
+	let response = server_api::client()?
 		.get(server_endpoint(&game_id, None)?)
 		.send()
 		.await
@@ -184,7 +176,7 @@ async fn submit_to_server(
 	let game_id = crate::env::normalize_game_id(game_id)?;
 	validate_board_id(board_id)?;
 
-	let response = server_client()?
+	let response = server_api::client()?
 		.post(server_endpoint(&game_id, Some(board_id))?)
 		.json(&submission)
 		.send()
@@ -210,7 +202,7 @@ async fn sync_with_server(
 ) -> Result<LeaderboardListResponse, String>
 {
 	let game_id = crate::env::normalize_game_id(game_id)?;
-	let response = server_client()?
+	let response = server_api::client()?
 		.put(server_endpoint(&game_id, None)?)
 		.json(&request)
 		.send()
@@ -303,15 +295,15 @@ pub async fn serve_local_api(process_state: crate::commands::launch::GameProcess
 	{
 		Ok(listener) => listener,
 		Err(error) => {
-			eprintln!("Unity leaderboard APIを起動できません: {error}");
+			tracing::error!(target: "gamelauncher::ranking", event = "local_api_bind_failed", message = %error);
 			return;
 		}
 	};
 
-	println!("Unity leaderboard API listening on http://{LOCAL_API_BIND}");
+	tracing::info!(target: "gamelauncher::ranking", event = "local_api_started", address = LOCAL_API_BIND);
 	if let Err(error) = axum::serve(listener, app).await
 	{
-		eprintln!("Unity leaderboard API error: {error}");
+		tracing::error!(target: "gamelauncher::ranking", event = "local_api_failed", message = %error);
 	}
 }
 
@@ -319,6 +311,17 @@ pub async fn serve_local_api(process_state: crate::commands::launch::GameProcess
 mod tests
 {
 	use super::*;
+
+	#[test]
+	fn score_proxy_preserves_exact_text_and_accepts_old_integers() {
+		let submission: ScoreSubmission = serde_json::from_str(r#"{"player_name":"A","score":"1.234567890123456789e1000"}"#).unwrap();
+		assert_eq!(submission.score, "1.234567890123456789e1000");
+		let old: ScoreSubmission = serde_json::from_str(r#"{"player_name":"A","score":9223372036854775807}"#).unwrap();
+		assert_eq!(old.score, "9223372036854775807");
+		let encoded = serde_json::to_value(submission).unwrap();
+		assert!(encoded["score"].is_string());
+		assert!(serde_json::from_str::<ScoreSubmission>(r#"{"player_name":"A","score":100000000000000000000000000001}"#).is_err());
+	}
 
 	#[test]
 	fn server_board_ids_are_hidden_behind_slots()

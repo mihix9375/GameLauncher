@@ -1,9 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "gamelauncher",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "identifier": "com.gamelauncher.app",
   "build": {
+    "beforeBuildCommand": "npm run vendor:markdown",
+    "beforeDevCommand": "npm run vendor:markdown",
     "frontendDist": "../src"
   },
   "app": {

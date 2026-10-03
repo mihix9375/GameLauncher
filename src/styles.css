@@ -1217,7 +1217,34 @@ body.modal-background-blurred > .app-layout {
   font-size: 15px;
   line-height: 1.8;
   color: var(--text-secondary);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
+
+.description-text > :first-child { margin-top: 0; }
+.description-text > :last-child { margin-bottom: 0; }
+.description-text p { margin: 0 0 1em; }
+.description-text h1, .description-text h2, .description-text h3,
+.description-text h4, .description-text h5, .description-text h6 {
+  margin: 1.2em 0 .5em;
+  color: var(--text-primary);
+  line-height: 1.4;
+  letter-spacing: normal;
+}
+.description-text h1 { font-size: 24px; }
+.description-text h2 { font-size: 21px; }
+.description-text h3 { font-size: 18px; }
+.description-text ul, .description-text ol { padding-left: 1.7em; margin: 0 0 1em; }
+.description-text li { margin-bottom: .3em; }
+.description-text a { color: var(--accent-blue); text-decoration: underline; }
+.description-text blockquote { margin: 1em 0; padding: 8px 16px; border-left: 3px solid var(--accent-blue); }
+.description-text pre { overflow-x: auto; padding: 14px; border-radius: 10px; background: var(--bg-secondary); white-space: pre; }
+.description-text code { font: .9em/1.6 ui-monospace, monospace; }
+.description-text :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: var(--bg-secondary); }
+.description-text table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 1em 0; }
+.description-text th, .description-text td { border: 1px solid var(--glass-border); padding: 7px 12px; }
+.description-text img { max-width: 100%; height: auto; border-radius: 10px; }
+.description-text hr { margin: 1.5em 0; border: 0; border-top: 1px solid var(--glass-border); }
 
 /* Game Comments */
 .leaderboard-section {

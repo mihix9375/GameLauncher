@@ -1,5 +1,16 @@
+import { canonicalGameId } from "./gameIdentity.js";
+
 let allGames = [];
 let selectedGame = null;
+let runningGameId = "";
+
+export function setRunningGameId(id) {
+	runningGameId = canonicalGameId(id);
+}
+
+export function isGameRunning(game) {
+	return Boolean(runningGameId) && canonicalGameId(game) === runningGameId;
+}
 
 const MOCK_METADATA = {
 	default: {
@@ -30,13 +41,9 @@ export function setAllGames(games) {
 	allGames = games;
 }
 
-function canonicalGameId(value) {
-	return String(value || "").trim().replace(/\.exe$/i, "").toLocaleLowerCase();
-}
-
 export function findGameById(gameId) {
 	const targetId = canonicalGameId(gameId);
-	return allGames.find(game => canonicalGameId(game.id || game.game) === targetId);
+	return allGames.find(game => canonicalGameId(game) === targetId);
 }
 
 export function removeGameById(gameId) {
@@ -44,10 +51,10 @@ export function removeGameById(gameId) {
 	if (!targetId) return false;
 	const previousLength = allGames.length;
 	allGames = allGames.filter(game => {
-		const id = canonicalGameId(game.id || game.game);
+		const id = canonicalGameId(game);
 		return id !== targetId;
 	});
-	if (selectedGame && canonicalGameId(selectedGame.id || selectedGame.game) === targetId) {
+	if (selectedGame && canonicalGameId(selectedGame) === targetId) {
 		selectedGame = null;
 	}
 	return allGames.length !== previousLength;
@@ -75,7 +82,7 @@ export function setGameUpdateFlag(gameId, version) {
 		allGames.push({
 			id: gameId,
 			game: gameId,
-			title: gameId,
+			title: "ゲーム情報を取得中…",
 			version: "未インストール",
 			isInstalled: false,
 			hasUpdate: true,
@@ -84,6 +91,27 @@ export function setGameUpdateFlag(gameId, version) {
 			image: "3"
 		});
 	}
+}
+
+export function applyRemoteGameMetadata(gameId, metadata) {
+	const game = findGameById(gameId);
+	if (!game || game.isInstalled !== false || !metadata || canonicalGameId(metadata) !== canonicalGameId(gameId)) return null;
+	// Update descriptive data without resetting download progress or update flags.
+	Object.assign(game, {
+		title: metadata.title || "タイトル未設定",
+		author: metadata.author || "",
+		description: metadata.description || "",
+		tags: metadata.tags || [],
+		game: metadata.game || game.game,
+		latestUpdate: metadata.latestUpdate || metadata.latest_update || "",
+		version: metadata.version || game.version,
+	});
+	const image = metadata.titleImage || metadata.title_image;
+	if (image) {
+		game.image = image;
+		game.titleImage = image;
+	}
+	return game;
 }
 
 export function setGameDownloadProgress(gameId, progress) {

@@ -144,6 +144,7 @@ impl UpdatePaths
 pub async fn download_game(app_handle: AppHandle, game_id: String, version: String) -> Result<(), String>
 {
 	let clean_id = crate::env::normalize_game_id(&game_id)?;
+	tracing::info!(target: "gamelauncher::download", event = "download_started", game_id = %clean_id, version = %version);
 	let storage_lock = game_storage_lock(&clean_id).await;
 	let _download_guard = storage_lock.lock().await;
 	let games_path = crate::env::get_games_path()?;
@@ -159,9 +160,11 @@ pub async fn download_game(app_handle: AppHandle, game_id: String, version: Stri
 	let result = download_and_install(&app_handle, &clean_id, &version, &game_path, &paths).await;
 	let _ = tokio::fs::remove_dir_all(&paths.work_dir).await;
 	if result.is_ok() {
+		tracing::info!(target: "gamelauncher::download", event = "download_complete", game_id = %clean_id, version = %version);
 		let _ = tokio::fs::remove_dir_all(&paths.backup).await;
 		emit_download_state(&app_handle, &clean_id, "complete", None);
 	} else if let Err(error) = &result {
+		tracing::error!(target: "gamelauncher::download", event = "download_failed", game_id = %clean_id, message = %error);
 		emit_download_state(&app_handle, &clean_id, "error", Some(error.clone()));
 	}
 	result

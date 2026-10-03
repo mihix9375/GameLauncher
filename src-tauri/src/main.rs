@@ -3,6 +3,7 @@
 mod env;
 mod description;
 mod server_api;
+mod logging;
 mod commands;
 mod wait_update;
 
@@ -11,6 +12,15 @@ use tauri::Manager;
 #[tokio::main]
 async fn main()
 {
+	let log_state = env::get_base_path().ok().and_then(|root| {
+		match logging::init(&root) {
+			Ok(state) => Some(state),
+			Err(error) => { eprintln!("ログファイルを初期化できません: {error}"); None }
+		}
+	});
+	if let Some((_, path)) = &log_state {
+		tracing::info!(target: "gamelauncher::runtime", event = "launcher_started", log_file = %path.display(), version = env!("CARGO_PKG_VERSION"));
+	}
 	tauri::Builder::default()
 	.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
 		if let Some(window) = app.get_webview_window("main")
@@ -53,6 +63,7 @@ async fn main()
 		}
 	})
 	.invoke_handler(tauri::generate_handler![
+		logging::write_client_log,
 		commands::launch::launch,
 		commands::launch::is_game_running,
 		commands::launch::get_running_game_id,
@@ -72,4 +83,6 @@ async fn main()
 	])
 	.run(tauri::generate_context!())
 	.expect("error while running tauri application");
+	tracing::info!(target: "gamelauncher::runtime", event = "launcher_stopped");
+	drop(log_state);
 }

@@ -91,6 +91,5 @@ export async function loadGames() {
 		if (requestNumber !== latestLoadRequest) return;
 		console.error("Failed to load games:", error);
 		setLogText(`エラー: ゲーム情報の取得に失敗しました (${error})`);
-		alert(`ゲーム情報の表示に失敗しました。\n詳細: ${error}`);
 	}
 }

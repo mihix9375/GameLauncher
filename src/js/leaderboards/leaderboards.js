@@ -1,6 +1,7 @@
 import { invoke } from "../core/tauri.js";
 import { setCommunityTab } from "../ui/communityTabs.js";
 import { gameId } from "../core/gameIdentity.js";
+import { formatScore } from "./scoreFormat.js";
 
 let requestNumber = 0;
 let refreshTimer = null;
@@ -36,7 +37,8 @@ function renderBoard(board) {
 		const name = document.createElement("span");
 		name.textContent = entry.player_name;
 		const score = document.createElement("b");
-		score.textContent = Number(entry.score).toLocaleString("ja-JP");
+		score.textContent = formatScore(entry.score);
+		score.title = String(entry.score);
 		row.append(rank, name, score);
 		list.append(row);
 	}

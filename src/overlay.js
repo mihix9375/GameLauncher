@@ -3,6 +3,14 @@ const confirmation = document.getElementById("close-confirmation");
 const cancelButton = document.getElementById("confirm-cancel");
 const confirmButton = document.getElementById("confirm-close");
 
+function reportOverlayError(message, error) {
+  console.error(message, error);
+  const detail = error instanceof Error ? error.stack || error.message : String(error);
+  void window.__TAURI__.core.invoke("write_client_log", {
+    level: "ERROR", source: "overlay", message: `${message}: ${detail}`.slice(0, 16000),
+  }).catch(() => {});
+}
+
 function waitForHiddenFrame() {
   return new Promise(resolve => {
     window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
@@ -30,7 +38,7 @@ closeButton?.addEventListener("click", async () => {
   try {
     await window.__TAURI__.core.invoke("request_close_game");
   } catch (error) {
-    console.error("Failed to show close confirmation:", error);
+    reportOverlayError("Failed to show close confirmation", error);
   } finally {
     closeButton.disabled = false;
   }
@@ -42,7 +50,7 @@ confirmButton?.addEventListener("click", async () => {
   try {
     await window.__TAURI__.core.invoke("close_game");
   } catch (error) {
-    console.error("Failed to close game:", error);
+    reportOverlayError("Failed to close game", error);
 	} finally {
     confirmButton.disabled = false;
     cancelButton.disabled = false;
@@ -57,7 +65,7 @@ cancelButton?.addEventListener("click", async () => {
   try {
     await window.__TAURI__.core.invoke("cancel_close_game");
   } catch (error) {
-    console.error("Failed to cancel closing the game:", error);
+    reportOverlayError("Failed to cancel closing the game", error);
     window.showCloseConfirmation?.();
   } finally {
     cancelButton.disabled = false;

@@ -3,6 +3,9 @@ import { setupEventListeners } from "./js/events/setupEventListeners.js";
 import { loadGames } from "./js/games/loadGames.js";
 import { setupScrollHint } from "./js/ui/scrollHint.js";
 import { setupFullscreenToggle } from "./js/ui/fullscreen.js";
+import { initFileLogging } from "./js/ui/log.js";
+
+initFileLogging();
 
 // WebView2は最小化・非表示状態でタイマーやページ処理を休止する場合がある。
 // 未解決のWeb Lockを保持し、起動直後に最小化されても初期処理を継続させる。

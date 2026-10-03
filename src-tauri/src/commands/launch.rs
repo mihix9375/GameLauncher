@@ -163,6 +163,7 @@ pub fn launch(
 		.spawn()
 		.map_err(|e| format!("起動に失敗しました ({}): {}", exe_path.display(), e))?;
 	let process_id = child.id();
+	tracing::info!(target: "gamelauncher::game", event = "game_started", game_id = %clean_id, process_id);
 	*guard = Some(child);
 	*process_state.active_game.lock()
 		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = Some(ActiveGame {
@@ -196,7 +197,7 @@ pub fn request_close_game(
 		return Err("起動中のゲームが見つかりません".to_string());
 	}
 	if let Err(error) = suspend_current_game(process_state.inner()) {
-		eprintln!("ゲームを一時停止できません（確認画面は表示します）: {error}");
+		tracing::warn!(target: "gamelauncher::game", event = "suspend_failed", message = %error);
 	}
 	if let Err(error) = show_close_confirmation(&app_handle) {
 		process_state.confirming_close.store(false, Ordering::SeqCst);
@@ -246,6 +247,7 @@ pub fn begin_shutdown(app_handle: AppHandle)
 	}
 
 	tauri::async_runtime::spawn(async move {
+		tracing::info!(target: "gamelauncher::runtime", event = "shutdown_requested");
 		let state_for_termination = process_state.clone();
 		let _ = tokio::task::spawn_blocking(move || terminate_current_game(&state_for_termination)).await;
 		hide_overlay(&app_handle);
@@ -343,7 +345,8 @@ fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, pro
 				let Some(child) = guard.as_mut() else { return; };
 				if child.id() != process_id { return; }
 				match child.try_wait() {
-					Ok(Some(_)) => {
+					Ok(Some(status)) => {
+						tracing::info!(target: "gamelauncher::game", event = "game_exited", process_id, exit_code = ?status.code());
 						*guard = None;
 						true
 					}
@@ -355,7 +358,8 @@ fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, pro
 						}
 						false
 					}
-					Err(_) => {
+					Err(error) => {
+						tracing::error!(target: "gamelauncher::game", event = "game_monitor_failed", process_id, message = %error);
 						*guard = None;
 						true
 					}

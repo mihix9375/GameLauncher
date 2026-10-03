@@ -22,7 +22,6 @@ export async function launchGame(game) {
 		if (window.__TAURI__ && await invoke("is_game_running")) {
 			const message = "別のゲームが既に起動しています。終了してから起動してください。";
 			setLogText(message);
-			alert(message);
 			return;
 		}
 
@@ -87,7 +86,7 @@ export async function launchGame(game) {
 			await refreshGameSession();
 		} else {
 			await new Promise(resolve => setTimeout(resolve, 1200));
-			alert(`[テストモード] ゲーム「${game.title}」を起動しました！`);
+			setLogText(`[テストモード] ゲーム「${game.title}」を起動しました`);
 		}
 
 		setLogText(`${game.title} を実行中`);
@@ -109,7 +108,6 @@ export async function launchGame(game) {
 		updateDetailDownloadUi(game);
 		const operation = downloadAttempted || wasRemoteOnly ? "ダウンロード" : "起動";
 		setLogText(`エラー: ${game.title} の${operation}に失敗しました (${detail})`);
-		alert(`ゲームの${operation}時にエラーが発生しました。\n詳細: ${detail}`);
 	} finally {
 		launchRequestInProgress = false;
 	}

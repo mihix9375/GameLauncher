@@ -11,12 +11,23 @@ const LIST_ROUTE: &str = "/v1/leaderboards";
 const SUBMIT_ROUTE: &str = "/v1/leaderboards/{board_id}/scores";
 const MAX_BOARD_ID_LENGTH: usize = 32;
 
+// 旧Serverの整数応答も読み取り、JSへは桁落ちしない文字列で渡す。
+fn score_text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+	#[derive(Deserialize)] #[serde(untagged)] enum Input { Text(String), Signed(i64), Unsigned(u64) }
+	match Input::deserialize(deserializer)? {
+		Input::Text(value) => Ok(value),
+		Input::Signed(value) => Ok(value.to_string()),
+		Input::Unsigned(value) => Ok(value.to_string()),
+	}
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RankedEntry
 {
 	pub rank: usize,
 	pub player_name: String,
-	pub score: i64,
+	#[serde(deserialize_with = "score_text")]
+	pub score: String,
 	pub submitted_at: i64,
 }
 
@@ -62,7 +73,8 @@ struct SyncLeaderboardsRequest
 struct ScoreSubmission
 {
 	player_name: String,
-	score: i64,
+	#[serde(deserialize_with = "score_text")]
+	score: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -283,15 +295,15 @@ pub async fn serve_local_api(process_state: crate::commands::launch::GameProcess
 	{
 		Ok(listener) => listener,
 		Err(error) => {
-			eprintln!("Unity leaderboard APIを起動できません: {error}");
+			tracing::error!(target: "gamelauncher::ranking", event = "local_api_bind_failed", message = %error);
 			return;
 		}
 	};
 
-	println!("Unity leaderboard API listening on http://{LOCAL_API_BIND}");
+	tracing::info!(target: "gamelauncher::ranking", event = "local_api_started", address = LOCAL_API_BIND);
 	if let Err(error) = axum::serve(listener, app).await
 	{
-		eprintln!("Unity leaderboard API error: {error}");
+		tracing::error!(target: "gamelauncher::ranking", event = "local_api_failed", message = %error);
 	}
 }
 
@@ -299,6 +311,17 @@ pub async fn serve_local_api(process_state: crate::commands::launch::GameProcess
 mod tests
 {
 	use super::*;
+
+	#[test]
+	fn score_proxy_preserves_exact_text_and_accepts_old_integers() {
+		let submission: ScoreSubmission = serde_json::from_str(r#"{"player_name":"A","score":"1.234567890123456789e1000"}"#).unwrap();
+		assert_eq!(submission.score, "1.234567890123456789e1000");
+		let old: ScoreSubmission = serde_json::from_str(r#"{"player_name":"A","score":9223372036854775807}"#).unwrap();
+		assert_eq!(old.score, "9223372036854775807");
+		let encoded = serde_json::to_value(submission).unwrap();
+		assert!(encoded["score"].is_string());
+		assert!(serde_json::from_str::<ScoreSubmission>(r#"{"player_name":"A","score":100000000000000000000000000001}"#).is_err());
+	}
 
 	#[test]
 	fn server_board_ids_are_hidden_behind_slots()

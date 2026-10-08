@@ -11,10 +11,32 @@ const dom = new JSDOM(`<!doctype html><div id="game-list"></div><div id="modal-t
   <span id="detail-download-progress-bar"></span><span id="detail-download-progress-label"></span>`);
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
+let invokeMock = async () => [];
+window.__TAURI__ = { core: { invoke: (...args) => invokeMock(...args) } };
 const { renderGames, updateGameCardDownloadUi } = await import("../src/js/games/renderGames.js");
 const { updateDetailMetadataUi, updateDetailDownloadUi } = await import("../src/js/modals/detailModal.js");
 
 const metadata = { id: "internal-id", title: "実際のゲームタイトル", game: "Game.exe", version: "1.0.0", author: "作者", description: "# 遊び方\n\n- 移動", tags: ["Unity"], latestUpdate: "2026/10/02" };
+
+test("card refresh preserves a newer notification and refuses cancelled results", async () => {
+  const { refreshGameCard } = await import("../src/js/games/loadGames.js");
+  let respond;
+  invokeMock = () => new Promise(resolve => { respond = resolve; });
+  try {
+    const existing = { ...metadata, isInstalled: true };
+    setAllGames([existing]);
+    const refresh = refreshGameCard(metadata.id);
+    setGameUpdateFlag(metadata.id, "2.0.0");
+    respond([{ ...metadata }]); await refresh;
+    assert.equal(existing.hasUpdate, true);
+    assert.equal(existing._latestVersion, "2.0.0");
+    const cancelled = refreshGameCard(metadata.id, () => false);
+    removeGameById(metadata.id);
+    respond([{ ...metadata }]);
+    assert.equal(await cancelled, null);
+    assert.equal(findGameById(metadata.id), undefined);
+  } finally { invokeMock = async () => []; }
+});
 
 test("running game stays marked after metadata replacement and restores buttons on exit", () => {
 	const game = { ...metadata, isInstalled: true };

@@ -28,20 +28,23 @@ export function sortGames(games) {
 	});
 }
 
-export async function refreshGameCard(gameId) {
+export async function refreshGameCard(gameId, shouldApply = () => true) {
 	if (!window.__TAURI__) return findGameById(gameId);
 	const refreshedGames = (await invoke("refresh")).map(normalizeGame);
+	if (!shouldApply()) return null;
 	const freshGame = refreshedGames.find(game => canonicalGameId(game) === canonicalGameId({ id: gameId }));
 	if (!freshGame) return null;
 
 	const existing = findGameById(gameId);
 	if (existing) {
+		const latestVersion = existing._latestVersion;
+		const hasUpdate = Boolean(latestVersion && latestVersion !== freshGame.version);
 		Object.assign(existing, freshGame, {
 			isInstalled: true,
-			hasUpdate: false,
-			_needsUpdate: false,
+			hasUpdate,
+			_needsUpdate: hasUpdate,
 		});
-		delete existing._latestVersion;
+		if (!hasUpdate) delete existing._latestVersion;
 		delete existing._downloadError;
 	} else {
 		getAllGames().push(freshGame);

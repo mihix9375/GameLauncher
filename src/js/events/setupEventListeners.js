@@ -13,6 +13,7 @@ import { formatError } from "../core/errors.js";
 import { updateDetailDownloadUi, updateDetailMetadataUi } from "../modals/detailModal.js";
 import { gameId } from "../core/gameIdentity.js";
 import { startGameSessionMonitoring } from "../games/gameSession.js";
+import { createDownloadQueue } from "../games/downloadQueue.js";
 
 const pendingMetadata = new Map();
 
@@ -181,10 +182,6 @@ export function setupEventListeners() {
 	document.getElementById("btn-submit-comment")?.addEventListener("click", submitComment);
 
 	if (window.__TAURI__ && window.__TAURI__.event) {
-		const maxConcurrentDownloads = 4;
-		const downloadQueue = [];
-		let activeDownloads = 0;
-		const pendingGameIds = new Set();
 		const removedGameIds = new Set();
 		let downloadAllRequested = false;
 		let downloadAllTimer = null;
@@ -201,69 +198,43 @@ export function setupEventListeners() {
 			downloadAllTimer = window.setTimeout(() => { downloadAllRequested = false; }, 750);
 		}
 
-		function enqueueDownload(gameId, version, cleanId) {
-			if (pendingGameIds.has(cleanId)) return;
-			pendingGameIds.add(cleanId);
-			setGameDownloadProgress(cleanId, {
-				game_id: cleanId,
-				stage: "queued",
-				received_bytes: 0,
-				total_bytes: 0,
-			});
-			renderGames(getAllGames());
-			downloadQueue.push({ game_id: gameId, version, cleanId });
-			pumpDownloadQueue();
-		}
-
-		function updateDownloadSummary() {
-			const total = activeDownloads + downloadQueue.length;
-			if (total > 0) {
-				setLogText(`[同時ダウンロード中] ${activeDownloads}件を処理中 / 待機${downloadQueue.length}件`);
-			} else {
-				setLogText("ゲーム情報の同期・更新がすべて完了しました");
-			}
-		}
-
-		async function downloadQueuedGame(item) {
-			try {
+		const downloadQueue = createDownloadQueue({
+			onQueued(item) {
+				setGameDownloadProgress(item.cleanId, { game_id: item.cleanId, stage: "queued", received_bytes: 0, total_bytes: 0 });
+				renderGames(getAllGames());
+			},
+			onChanged({ active, waiting, failed }) {
+				if (active || waiting) setLogText(`[同時ダウンロード中] ${active}件を処理中 / 待機${waiting}件${failed ? ` / 失敗${failed}件` : ""}`);
+				else setLogText(failed ? `[エラー] ダウンロード処理終了: ${failed}件が失敗しました` : "ゲームのダウンロード処理が完了しました");
+			},
+			async run(item, isCancelled) {
 				await invoke("download_game", { gameId: item.game_id, version: item.version });
+				if (isCancelled() || removedGameIds.has(item.cleanId)) return;
 				const completedGame = findGameById(item.cleanId);
 				if (completedGame) {
 					completedGame.isInstalled = true;
 					completedGame.version = item.version;
-					completedGame.hasUpdate = false;
-					completedGame._needsUpdate = false;
+					completedGame.hasUpdate = Boolean(completedGame._latestVersion && completedGame._latestVersion !== item.version);
+					completedGame._needsUpdate = completedGame.hasUpdate;
 					setGameDownloadProgress(item.cleanId, null);
 				}
-				const refreshedGame = await refreshGameCard(item.cleanId);
-				if (refreshedGame) updateDetailDownloadUi(refreshedGame);
-			} catch (e) {
+				try {
+					const refreshedGame = await refreshGameCard(item.cleanId, () => !isCancelled() && !removedGameIds.has(item.cleanId));
+					if (!isCancelled() && refreshedGame) updateDetailDownloadUi(refreshedGame);
+				} catch (error) {
+					console.warn("ダウンロード済みゲームの表示更新に失敗:", error);
+					if (completedGame && !isCancelled()) { renderGames(getAllGames()); updateDetailDownloadUi(completedGame); }
+				}
+			},
+			onError(e, item) {
 				console.error("Auto download error:", e);
 				setGameDownloadProgress(item.cleanId, { stage: "error", error: String(e) });
 				renderGames(getAllGames());
 				const failedGame = findGameById(item.cleanId);
 				if (failedGame) updateDetailDownloadUi(failedGame);
 				setLogText(`[エラー] ${item.game_id} のダウンロード失敗: ${formatError(e, "サーバーで配布されていない可能性があります")}`);
-			} finally {
-				pendingGameIds.delete(item.cleanId);
-				activeDownloads -= 1;
-				pumpDownloadQueue();
-				updateDownloadSummary();
 			}
-		}
-
-		function pumpDownloadQueue() {
-			while (activeDownloads < maxConcurrentDownloads && downloadQueue.length > 0) {
-				const item = downloadQueue.shift();
-				if (removedGameIds.has(item.cleanId)) {
-					pendingGameIds.delete(item.cleanId);
-					continue;
-				}
-				activeDownloads += 1;
-				void downloadQueuedGame(item);
-			}
-			updateDownloadSummary();
-		}
+		});
 
 		const updateListener = window.__TAURI__.event.listen("update_notice", async (event) => {
 			const payload = event.payload;
@@ -277,8 +248,8 @@ export function setupEventListeners() {
 					setGameUpdateFlag(cleanId, payload.version);
 					renderGames(getAllGames());
 					if (!isInstalled) void refreshRemoteMetadata(cleanId);
-					if (isInstalled || downloadAllRequested) {
-						enqueueDownload(payload.game_id, payload.version, cleanId);
+					if (isInstalled || downloadAllRequested || payload.download_requested === true) {
+						downloadQueue.enqueue({ game_id: payload.game_id, version: payload.version, cleanId });
 					} else {
 						setLogText(`[新着] ${payload.game_id} をダウンロードできます`);
 					}
@@ -290,6 +261,7 @@ export function setupEventListeners() {
 		const progressListener = window.__TAURI__.event.listen("download_progress", (event) => {
 			const progress = event.payload;
 			if (!progress?.game_id) return;
+			if (removedGameIds.has(gameId(progress.game_id))) return;
 			if (setGameDownloadProgress(progress.game_id, progress)) {
 				const game = findGameById(progress.game_id);
 				if (game) {
@@ -302,13 +274,13 @@ export function setupEventListeners() {
 			const payload = event.payload;
 			if (!payload?.game_id) return;
 			const cleanId = gameId(payload.game_id);
-			removedGameIds.add(cleanId);
-			pendingGameIds.delete(cleanId);
 			if (payload.error) {
 				console.error("Server deletion error:", payload.error);
 				setLogText(`[エラー] ${cleanId} を削除できませんでした: ${payload.error}`);
 				return;
 			}
+			removedGameIds.add(cleanId);
+			downloadQueue.cancel(cleanId);
 			const selectedGame = getSelectedGame();
 			const selectedId = gameId(selectedGame);
 			removeGameById(cleanId);

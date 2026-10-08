@@ -97,6 +97,25 @@ struct ServerError
 	message: String,
 }
 
+#[derive(Debug)]
+struct RankingRequestError { status: StatusCode, message: String }
+impl From<String> for RankingRequestError {
+	fn from(message: String) -> Self { Self { status: StatusCode::BAD_GATEWAY, message } }
+}
+fn bad_ranking_request(message: String) -> RankingRequestError {
+	RankingRequestError { status: StatusCode::BAD_REQUEST, message }
+}
+async fn server_error(response: reqwest::Response, operation: &str) -> RankingRequestError {
+	let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+	let fallback = format!("{operation} (HTTP {status})");
+	let message = match response.text().await {
+		Ok(body) => serde_json::from_str::<ServerError>(&body).map(|error| error.message)
+			.unwrap_or_else(|_| if body.trim().is_empty() { fallback.clone() } else { body.chars().take(4096).collect() }),
+		Err(_) => fallback,
+	};
+	RankingRequestError { status, message }
+}
+
 fn authorized_game_id(
 	headers: &HeaderMap,
 	process_state: &crate::commands::launch::GameProcessState,
@@ -143,7 +162,7 @@ fn validate_board_id(board_id: &str) -> Result<(), String>
 	if is_valid { Ok(()) } else { Err("ランキングIDが不正です".to_string()) }
 }
 
-async fn fetch_from_server(game_id: &str) -> Result<LeaderboardListResponse, String>
+async fn fetch_from_server(game_id: &str) -> Result<LeaderboardListResponse, RankingRequestError>
 {
 	let game_id = crate::env::normalize_game_id(game_id)?;
 	let response = server_api::client()?
@@ -154,24 +173,46 @@ async fn fetch_from_server(game_id: &str) -> Result<LeaderboardListResponse, Str
 
 	if !response.status().is_success()
 	{
-		return Err(format!("ランキングを取得できません (HTTP {})", response.status()));
+		return Err(server_error(response, "ランキングを取得できません").await);
 	}
 
-	let mut result: LeaderboardListResponse = response.json().await
+	decode_list_response(response, &game_id).await
+}
+
+async fn decode_list_response(response: reqwest::Response, game_id: &str) -> Result<LeaderboardListResponse, RankingRequestError> {
+	let result: LeaderboardListResponse = response.json().await
 		.map_err(|error| format!("ランキングの応答が不正です: {error}"))?;
-	result.leaderboards.truncate(2);
-	for board in &mut result.leaderboards
-	{
-		board.entries.truncate(10);
-	}
+	validate_server_list(&result, game_id)?;
 	Ok(result)
+}
+
+fn validate_server_list(result: &LeaderboardListResponse, game_id: &str) -> Result<(), RankingRequestError> {
+	if result.game_id != game_id || result.leaderboards.len() > 2 {
+		return Err("ランキング応答のゲームIDまたは件数が不正です".to_string().into());
+	}
+	let mut ids = std::collections::HashSet::new();
+	for board in &result.leaderboards {
+		validate_board_id(&board.id)?;
+		if !ids.insert(&board.id) || board.name.trim().is_empty() || board.name.chars().count() > 40
+			|| board.name.chars().any(char::is_control) || !matches!(board.order.as_str(), "high_score" | "low_score")
+			|| board.entries.len() > 10 {
+			return Err("ランキング応答の設定が不正です".to_string().into());
+		}
+		for (index, entry) in board.entries.iter().enumerate() {
+			if entry.rank != index + 1 || entry.player_name.trim().is_empty() || entry.player_name.chars().count() > 24
+				|| entry.player_name.chars().any(char::is_control) || entry.submitted_at < 0 {
+				return Err("ランキング応答の記録が不正です".to_string().into());
+			}
+		}
+	}
+	Ok(())
 }
 
 async fn submit_to_server(
 	game_id: &str,
 	board_id: &str,
 	submission: ScoreSubmission,
-) -> Result<ScoreSubmissionResponse, String>
+) -> Result<ScoreSubmissionResponse, RankingRequestError>
 {
 	let game_id = crate::env::normalize_game_id(game_id)?;
 	validate_board_id(board_id)?;
@@ -186,20 +227,25 @@ async fn submit_to_server(
 
 	if !status.is_success()
 	{
-		let message = response.json::<ServerError>().await
-			.map(|error| error.message)
-			.unwrap_or_else(|_| format!("スコアを登録できません (HTTP {status})"));
-		return Err(message);
+		return Err(server_error(response, "スコアを登録できません").await);
 	}
 
-	response.json().await
-		.map_err(|error| format!("ランキングの応答が不正です: {error}"))
+	decode_submission_response(response).await
+}
+
+async fn decode_submission_response(response: reqwest::Response) -> Result<ScoreSubmissionResponse, RankingRequestError> {
+	let result: ScoreSubmissionResponse = response.json().await
+		.map_err(|error| format!("ランキングの応答が不正です: {error}"))?;
+	if !result.ok || result.rank == 0 {
+		return Err("スコア送信の成功を確認できません。自動再送しないでください".to_string().into());
+	}
+	Ok(result)
 }
 
 async fn sync_with_server(
 	game_id: &str,
 	request: SyncLeaderboardsRequest,
-) -> Result<LeaderboardListResponse, String>
+) -> Result<LeaderboardListResponse, RankingRequestError>
 {
 	let game_id = crate::env::normalize_game_id(game_id)?;
 	let response = server_api::client()?
@@ -211,13 +257,9 @@ async fn sync_with_server(
 	let status = response.status();
 	if !status.is_success()
 	{
-		let message = response.json::<ServerError>().await
-			.map(|error| error.message)
-			.unwrap_or_else(|_| format!("ランキングを同期できません (HTTP {status})"));
-		return Err(message);
+		return Err(server_error(response, "ランキングを同期できません").await);
 	}
-	response.json().await
-		.map_err(|error| format!("ランキングの応答が不正です: {error}"))
+	decode_list_response(response, &game_id).await
 }
 
 fn expose_slots(mut result: LeaderboardListResponse) -> LocalLeaderboardListResponse
@@ -232,7 +274,7 @@ fn expose_slots(mut result: LeaderboardListResponse) -> LocalLeaderboardListResp
 #[tauri::command]
 pub async fn get_leaderboards(game_id: String) -> Result<Vec<Leaderboard>, String>
 {
-	Ok(fetch_from_server(&game_id).await?.leaderboards)
+	Ok(fetch_from_server(&game_id).await.map_err(|error| error.message)?.leaderboards)
 }
 
 type ProxyResult<T> = Result<Json<T>, (StatusCode, Json<ProxyError>)>;
@@ -242,13 +284,17 @@ fn proxy_error(message: String) -> (StatusCode, Json<ProxyError>)
 	(StatusCode::BAD_GATEWAY, Json(ProxyError { ok: false, message }))
 }
 
+fn proxy_request_error(error: RankingRequestError) -> (StatusCode, Json<ProxyError>) {
+	(error.status, Json(ProxyError { ok: false, message: error.message }))
+}
+
 async fn proxy_list(
 	State(process_state): State<crate::commands::launch::GameProcessState>,
 	headers: HeaderMap,
 ) -> ProxyResult<LocalLeaderboardListResponse>
 {
 	let game_id = authorized_game_id(&headers, &process_state)?;
-	let result = fetch_from_server(&game_id).await.map_err(proxy_error)?;
+	let result = fetch_from_server(&game_id).await.map_err(proxy_request_error)?;
 	Ok(Json(expose_slots(result)))
 }
 
@@ -259,7 +305,7 @@ async fn proxy_sync(
 ) -> ProxyResult<LocalLeaderboardListResponse>
 {
 	let game_id = authorized_game_id(&headers, &process_state)?;
-	let result = sync_with_server(&game_id, request).await.map_err(proxy_error)?;
+	let result = sync_with_server(&game_id, request).await.map_err(proxy_request_error)?;
 	Ok(Json(expose_slots(result)))
 }
 
@@ -273,15 +319,15 @@ async fn proxy_submit(
 	let game_id = authorized_game_id(&headers, &process_state)?;
 	if board_slot > 1
 	{
-		return Err(proxy_error("ランキング番号は0または1で指定してください".to_string()));
+		return Err(proxy_request_error(bad_ranking_request("ランキング番号は0または1で指定してください".to_string())));
 	}
-	let boards = fetch_from_server(&game_id).await.map_err(proxy_error)?;
+	let boards = fetch_from_server(&game_id).await.map_err(proxy_request_error)?;
 	let board_id = boards.leaderboards.get(board_slot)
 		.map(|board| board.id.as_str())
-		.ok_or_else(|| proxy_error("指定したランキングはまだ同期されていません".to_string()))?;
+		.ok_or_else(|| proxy_request_error(RankingRequestError { status: StatusCode::CONFLICT, message: "指定したランキングはまだ同期されていません".to_string() }))?;
 	let result = submit_to_server(&game_id, board_id, submission)
 		.await
-		.map_err(proxy_error)?;
+		.map_err(proxy_request_error)?;
 	Ok(Json(result))
 }
 
@@ -311,6 +357,57 @@ pub async fn serve_local_api(process_state: crate::commands::launch::GameProcess
 mod tests
 {
 	use super::*;
+
+	async fn response(status: u16, body: &str) -> reqwest::Response {
+		use tokio::io::{AsyncReadExt, AsyncWriteExt};
+		let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+		let address = listener.local_addr().unwrap();
+		let body = body.to_string();
+		tokio::spawn(async move {
+			let (mut stream, _) = listener.accept().await.unwrap();
+			let mut input = [0; 4096];
+			stream.read(&mut input).await.unwrap();
+			stream.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+		});
+		reqwest::Client::new().get(format!("http://{address}")).send().await.unwrap()
+	}
+
+	#[tokio::test]
+	async fn malformed_lists_are_rejected_not_silently_truncated_or_remapped() {
+		let board = r#"{"id":"0","name":"Score","order":"high_score","entries":[]}"#;
+		for body in [
+			format!(r#"{{"game_id":"other","leaderboards":[{board}]}}"#),
+			format!(r#"{{"game_id":"game","leaderboards":[{board},{board}]}}"#),
+			format!(r#"{{"game_id":"game","leaderboards":[{board},{board},{board}]}}"#),
+			"{}".into(),
+		] {
+			assert!(decode_list_response(response(200, &body).await, "game").await.is_err());
+		}
+		let body = format!(r#"{{"game_id":"game","leaderboards":[{board}]}}"#);
+		assert!(decode_list_response(response(200, &body).await, "game").await.is_ok());
+	}
+
+	#[tokio::test]
+	async fn proxy_preserves_server_status_and_json_or_plain_error_reason() {
+		for status in [400, 422, 500] {
+			let error = server_error(response(status, r#"{"message":"storage or validation failed"}"#).await, "Failed").await;
+			let (code, Json(body)) = proxy_request_error(error);
+			assert_eq!(code.as_u16(), status);
+			assert_eq!(body.message, "storage or validation failed");
+		}
+		let error = server_error(response(422, "Invalid score").await, "Failed").await;
+		assert_eq!(error.message, "Invalid score");
+		let error = server_error(response(500, "").await, "Failed").await;
+		assert!(error.message.contains("HTTP 500"));
+	}
+
+	#[tokio::test]
+	async fn proxy_rejects_malformed_success_instead_of_claiming_submission_succeeded() {
+		for body in ["{}", r#"{"ok":false,"rank":1}"#, r#"{"ok":true,"rank":0}"#, "not-json"] {
+			assert!(decode_submission_response(response(200, body).await).await.is_err());
+		}
+		assert_eq!(decode_submission_response(response(200, r#"{"ok":true,"rank":1}"#).await).await.unwrap().rank, 1);
+	}
 
 	#[test]
 	fn score_proxy_preserves_exact_text_and_accepts_old_integers() {

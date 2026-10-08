@@ -103,6 +103,8 @@ export function startLeaderboardAutoRefresh(game) {
 }
 
 export function stopLeaderboardAutoRefresh() {
+	// 閉じた画面への遅延応答も無効化する。
+	requestNumber++;
 	if (refreshTimer !== null) {
 		window.clearInterval(refreshTimer);
 		refreshTimer = null;

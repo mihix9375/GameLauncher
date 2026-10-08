@@ -39,10 +39,22 @@ pub async fn restart_wait_update(app_handle: tauri::AppHandle)
 			if let Ok(response) = client.wait_update(request).await {
 				let mut stream = response.into_inner();
 				while let Ok(Some(notice)) = stream.message().await {
+					let Ok(action) = UpdateAction::try_from(notice.action) else { continue; };
+					if action == UpdateAction::Download {
+						for download in notice.downloads {
+							let Ok(game_id) = crate::env::normalize_game_id(&download.game_id) else { continue; };
+							let _ = app_handle.emit("update_notice", serde_json::json!({
+								"game_id": game_id,
+								"version": download.version,
+								"download_requested": true,
+							}));
+						}
+						continue;
+					}
 					let Ok(game_id) = crate::env::normalize_game_id(&notice.game_id) else {
 						continue;
 					};
-					if UpdateAction::try_from(notice.action).unwrap_or(UpdateAction::Upsert) == UpdateAction::Delete
+					if action == UpdateAction::Delete
 					{
 						let result = crate::commands::delete_game::apply_server_deletion(&app_handle, &game_id).await;
 						let (deleted, error) = match result

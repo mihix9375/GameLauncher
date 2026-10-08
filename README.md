@@ -24,7 +24,11 @@
 
 ## ランキングスコア
 
-GameLauncher v0.7.0・GameServer v0.6.0・UPM v0.3.0を組み合わせてください。スコアの送受信は数値文字列となり、旧版との混在はできません。大きなスコアは`1.235e1000`のような4有効桁表示になりますが、保存値・順位は丸めません。ポインタを合わせると丸めていない数値文字列を確認できます。
+v0.8.0では、別ゲームのID・重複ランキング・過剰な件数などの不正な応答を、切り詰めて成功扱いにせず拒否します。詳細画面を閉じた後に届く古いランキング応答は表示へ反映しません。
+
+v0.8.0では、ゲーム向けランキングAPIでServerのHTTPエラーコード・理由を保持して返します。HTTP成功でもスコアの成功フラグや順位が不正なら失敗として通知し、自動再送はしません。
+
+GameLauncher v0.8.0・GameServer v0.7.0・UPM v0.3.1を組み合わせてください。スコアの送受信は数値文字列となり、旧APIとの混在はできません。大きなスコアは`1.235e1000`のような4有効桁表示になりますが、保存値・順位は丸めません。ポインタを合わせると丸めていない数値文字列を確認できます。
 
 ## ログ
 
@@ -95,10 +99,10 @@ GameServerの管理画面でゲームが削除されると、Launcher側のイ�
 Unity Package Managerから専用パッケージを追加すると、HTTPやJSONを直接実装せずに利用できます。
 
 > [!IMPORTANT]
-> 旧APIと後方互換性はありません。`game_id`や自由文字列のランキングIDを指定する方式は廃止され、GameLauncherが発行するセッショントークンと固定スロット`0`・`1`を使用します。GameLauncher v0.7.0、GameServer v0.6.0、UPMパッケージ v0.3.0を組み合わせてください。
+> 旧APIと後方互換性はありません。`game_id`や自由文字列のランキングIDを指定する方式は廃止され、GameLauncherが発行するセッショントークンと固定スロット`0`・`1`を使用します。GameLauncher v0.8.0、GameServer v0.7.0、UPMパッケージ v0.3.1を組み合わせてください。
 
 ```text
-https://github.com/mihix9375/GameLauncher-Unity-Ranking.git#v0.2.0
+https://github.com/mihix9375/GameLauncher-Unity-Ranking.git#v0.3.0
 ```
 
 ```csharp
@@ -179,3 +183,6 @@ cargo test
 - [GameServer](https://github.com/mihix9375/GameServer)
 - [GameLauncher Ranking API for Unity](https://github.com/mihix9375/GameLauncher-Unity-Ranking)
 - [共有proto](https://github.com/mihix9375/proto)
+## Serverからのダウンロード指示（v0.8.0）
+
+対応版Serverの管理画面から個別ゲーム・全ゲームのダウンロードを指示できます。通常の更新通知とは別の明示的な指示として、未取得ゲームも最大4件ずつ並列でダウンロードし、カードと詳細に進捗を表示します。最新版はスキップし、ダウンロード後に自動起動しません。指示時に未接続のLauncherには届きません。

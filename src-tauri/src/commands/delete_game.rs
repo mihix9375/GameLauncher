@@ -11,7 +11,7 @@ pub async fn apply_server_deletion(app_handle: &AppHandle, game_id: &str) -> Res
 	let game_path = games_path.join(&clean_id);
 	if !game_path.exists() { return Ok(false); }
 
-	super::launch::terminate_game_if_running(app_handle, &clean_id)?;
+	super::launch::terminate_game_if_running(app_handle, &clean_id).await?;
 	remove_game_directory(&game_path).await?;
 	let backup = games_path.join(".updates").join(format!("{clean_id}.backup"));
 	if backup.exists()

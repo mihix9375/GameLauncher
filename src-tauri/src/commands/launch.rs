@@ -29,6 +29,8 @@ pub struct GameProcessState
 	shutting_down: Arc<AtomicBool>,
 	confirming_close: Arc<AtomicBool>,
 	game_suspended: Arc<AtomicBool>,
+	terminating: Arc<AtomicBool>,
+	control: Arc<tokio::sync::Mutex<()>>,
 }
 
 struct ActiveGame
@@ -56,7 +58,12 @@ pub fn get_running_game_id(process_state: State<'_, GameProcessState>) -> Result
 {
 	let mut child = process_state.child.lock()
 		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?;
-	let Some(process) = child.as_mut() else { return Ok(None); };
+	let Some(process) = child.as_mut() else {
+		return if process_state.terminating.load(Ordering::SeqCst) {
+			process_state.active_game.lock().map(|active| active.as_ref().map(|game| game.game_id.clone()))
+				.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())
+		} else { Ok(None) };
+	};
 	if process.try_wait().map_err(|error| format!("ゲームプロセスの確認に失敗しました: {error}"))?.is_some() {
 		// 終了処理とオーバーレイの片付けは既存の監視タスクに任せる。
 		return Ok(None);
@@ -75,24 +82,34 @@ pub fn is_game_running(process_state: State<'_, GameProcessState>) -> Result<boo
 	match process.try_wait()
 	{
 		Ok(None) => Ok(true),
-		Ok(Some(_)) => {
-			*child = None;
-			process_state.game_suspended.store(false, Ordering::SeqCst);
-			*process_state.active_game.lock()
-				.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = None;
-			Ok(false)
-		}
+		// Only the exit monitor owns cleanup; polling must not leave an orphan overlay.
+		Ok(Some(_)) => Ok(false),
 		Err(error) => Err(format!("ゲームプロセスの確認に失敗しました: {error}")),
 	}
 }
 
 #[tauri::command]
-pub fn launch(
+pub async fn launch(
 	app_handle: AppHandle,
 	process_state: State<'_, GameProcessState>,
 	game_id: String,
 ) -> Result<(), String>
 {
+	let state = process_state.inner().clone();
+	let _control = state.control.lock().await;
+	let spawn_state = state.clone();
+	let process_id = tokio::task::spawn_blocking(move || start_game_process(&spawn_state, game_id)).await
+		.map_err(|error| format!("ゲーム起動処理に失敗しました: {error}"))??;
+	if let Err(error) = show_overlay(&app_handle) {
+		let _ = run_process_operation(state.clone(), terminate_current_game).await;
+		hide_overlay(&app_handle);
+		return Err(error);
+	}
+	monitor_game_exit(app_handle, state.clone(), process_id);
+	Ok(())
+}
+
+fn start_game_process(process_state: &GameProcessState, game_id: String) -> Result<u32, String> {
 	let games_path = env::get_games_path()?;
 	let clean_id = env::normalize_game_id(&game_id)?;
 	let game_dir = games_path.join(&clean_id);
@@ -139,6 +156,9 @@ pub fn launch(
 	}
 
 	let mut guard = process_state.child.lock().map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?;
+	if process_state.terminating.load(Ordering::SeqCst) || process_state.shutting_down.load(Ordering::SeqCst) {
+		return Err("ゲームの終了処理中です。終了してから起動してください".to_string());
+	}
 	if let Some(child) = guard.as_mut() {
 		match child.try_wait() {
 			Ok(Some(_)) => *guard = None,
@@ -174,34 +194,31 @@ pub fn launch(
 	process_state.confirming_close.store(false, Ordering::SeqCst);
 	process_state.game_suspended.store(false, Ordering::SeqCst);
 	drop(guard);
-
-	if let Err(error) = show_overlay(&app_handle) {
-		let _ = terminate_current_game(process_state.inner());
-		return Err(error);
-	}
-	monitor_game_exit(app_handle.clone(), process_state.inner().clone(), process_id);
-	Ok(())
+	Ok(process_id)
 }
 
 #[tauri::command]
-pub fn request_close_game(
+pub async fn request_close_game(
 	app_handle: AppHandle,
 	process_state: State<'_, GameProcessState>,
 ) -> Result<(), String>
 {
+	let state = process_state.inner().clone();
+	let _control = state.control.lock().await;
+	if state.shutting_down.load(Ordering::SeqCst) { return Err("Launcherの終了処理中です".into()); }
 	if process_state.confirming_close.swap(true, Ordering::SeqCst) {
 		return Ok(());
 	}
-	if current_process_id(process_state.inner())?.is_none() {
+	if !matches!(current_process_id(&state), Ok(Some(_))) {
 		process_state.confirming_close.store(false, Ordering::SeqCst);
 		return Err("起動中のゲームが見つかりません".to_string());
 	}
-	if let Err(error) = suspend_current_game(process_state.inner()) {
+	if let Err(error) = run_process_operation(state.clone(), suspend_current_game).await {
 		tracing::warn!(target: "gamelauncher::game", event = "suspend_failed", message = %error);
 	}
 	if let Err(error) = show_close_confirmation(&app_handle) {
 		process_state.confirming_close.store(false, Ordering::SeqCst);
-		let _ = resume_current_game(process_state.inner());
+		let _ = run_process_operation(state.clone(), resume_current_game).await;
 		let _ = show_normal_overlay(&app_handle);
 		return Err(format!("ゲーム終了確認を表示できません: {error}"));
 	}
@@ -209,25 +226,31 @@ pub fn request_close_game(
 }
 
 #[tauri::command]
-pub fn close_game(
+pub async fn close_game(
 	app_handle: AppHandle,
 	process_state: State<'_, GameProcessState>,
 ) -> Result<(), String>
 {
-	process_state.confirming_close.store(false, Ordering::SeqCst);
-	process_state.game_suspended.store(false, Ordering::SeqCst);
-	let result = terminate_current_game(process_state.inner());
-	hide_overlay(&app_handle);
+	let state = process_state.inner().clone();
+	let _control = state.control.lock().await;
+	let result = run_process_operation(state.clone(), terminate_current_game).await;
+	if result.is_ok() {
+		process_state.confirming_close.store(false, Ordering::SeqCst);
+		hide_overlay(&app_handle);
+	}
 	result
 }
 
 #[tauri::command]
-pub fn cancel_close_game(
+pub async fn cancel_close_game(
 	app_handle: AppHandle,
 	process_state: State<'_, GameProcessState>,
 ) -> Result<(), String>
 {
-	resume_current_game(process_state.inner())?;
+	let state = process_state.inner().clone();
+	let _control = state.control.lock().await;
+	if state.shutting_down.load(Ordering::SeqCst) { return Err("Launcherの終了処理中です".into()); }
+	run_process_operation(state.clone(), resume_current_game).await?;
 	process_state.confirming_close.store(false, Ordering::SeqCst);
 	let overlay = app_handle
 		.get_webview_window("game-overlay")
@@ -235,7 +258,23 @@ pub fn cancel_close_game(
 	overlay.eval("document.body.classList.add('is-positioning'); window.hideCloseConfirmation?.()")
 		.map_err(|error| error.to_string())?;
 	show_normal_overlay(&app_handle)?;
-	focus_current_game(process_state.inner())
+	// Focus is best-effort. A frozen game must not keep the control lock or × disabled.
+	drop(_control);
+	match tokio::time::timeout(std::time::Duration::from_millis(750), run_process_operation(state.clone(), focus_current_game)).await {
+		Ok(Ok(())) => {},
+		Ok(Err(error)) => tracing::warn!(target: "gamelauncher::game", event = "game_focus_failed", message = %error),
+		Err(_) => tracing::warn!(target: "gamelauncher::game", event = "game_focus_timeout"),
+	}
+	Ok(())
+}
+
+/// Game window/thread/process operations must never occupy the WebView's UI thread.
+async fn run_process_operation(
+	state: GameProcessState,
+	operation: fn(&GameProcessState) -> Result<(), String>,
+) -> Result<(), String> {
+	tokio::task::spawn_blocking(move || operation(&state)).await
+		.map_err(|error| format!("ゲーム操作に失敗しました: {error}"))?
 }
 
 pub fn begin_shutdown(app_handle: AppHandle)
@@ -248,8 +287,11 @@ pub fn begin_shutdown(app_handle: AppHandle)
 
 	tauri::async_runtime::spawn(async move {
 		tracing::info!(target: "gamelauncher::runtime", event = "shutdown_requested");
-		let state_for_termination = process_state.clone();
-		let _ = tokio::task::spawn_blocking(move || terminate_current_game(&state_for_termination)).await;
+		let _control = process_state.control.lock().await;
+		if let Err(error) = run_process_operation(process_state.clone(), terminate_current_game).await {
+			tracing::error!(target: "gamelauncher::runtime", event = "shutdown_game_failed", message = %error);
+		}
+		tracing::info!(target: "gamelauncher::runtime", event = "shutdown_game_complete");
 		hide_overlay(&app_handle);
 		app_handle.exit(0);
 	});
@@ -334,47 +376,64 @@ fn hide_overlay(app_handle: &AppHandle)
 	}
 }
 
+#[derive(Debug, PartialEq)]
+enum ProcessPoll { Running, Exited(Option<i32>), Replaced }
+
+/// This function performs only process-state work. All locks are released on return.
+fn poll_game_process(state: &GameProcessState, process_id: u32) -> Result<ProcessPoll, String> {
+	let mut guard = state.child.lock().map_err(|_| "ゲーム状態のロックに失敗しました".to_string())?;
+	let Some(child) = guard.as_mut() else {
+		return Ok(if state.terminating.load(Ordering::SeqCst) { ProcessPoll::Running } else { ProcessPoll::Replaced });
+	};
+	if child.id() != process_id { return Ok(ProcessPoll::Replaced); }
+	let status = child.try_wait().map_err(|error| error.to_string())?;
+	let Some(status) = status else { return Ok(ProcessPoll::Running); };
+	let mut active = state.active_game.lock().map_err(|_| "ゲーム情報のロックに失敗しました".to_string())?;
+	if active.as_ref().is_some_and(|game| game.process_id == process_id) { *active = None; }
+	*guard = None;
+	state.confirming_close.store(false, Ordering::SeqCst);
+	state.game_suspended.store(false, Ordering::SeqCst);
+	Ok(ProcessPoll::Exited(status.code()))
+}
+
 fn monitor_game_exit(app_handle: AppHandle, process_state: GameProcessState, process_id: u32)
 {
 	tauri::async_runtime::spawn(async move {
+		let overlay_pending = Arc::new(AtomicBool::new(false));
 		loop {
 			tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 			if process_state.shutting_down.load(Ordering::SeqCst) { return; }
-			let finished = {
-				let Ok(mut guard) = process_state.child.lock() else { return; };
-				let Some(child) = guard.as_mut() else { return; };
-				if child.id() != process_id { return; }
-				match child.try_wait() {
-					Ok(Some(status)) => {
-						tracing::info!(target: "gamelauncher::game", event = "game_exited", process_id, exit_code = ?status.code());
-						*guard = None;
-						true
-					}
-					Ok(None) => {
-						// 確認画面の表示中に通常表示へ戻すと、入力を受け付けない
-						// 透明オーバーレイだけが残る。通常時のみ最前面を維持する。
-						if !process_state.confirming_close.load(Ordering::SeqCst) {
-							let _ = position_normal_overlay(&app_handle);
-						}
-						false
-					}
-					Err(error) => {
-						tracing::error!(target: "gamelauncher::game", event = "game_monitor_failed", process_id, message = %error);
-						*guard = None;
-						true
-					}
+			// Never wait for a UI response while holding child/active_game locks.
+			let poll = match poll_game_process(&process_state, process_id) {
+				Ok(poll) => poll,
+				Err(error) => {
+					tracing::error!(target: "gamelauncher::game", event = "game_monitor_failed", process_id, message = %error);
+					return; // Keep process ownership; do not silently orphan a live game.
 				}
 			};
-			if finished {
-				process_state.confirming_close.store(false, Ordering::SeqCst);
-				process_state.game_suspended.store(false, Ordering::SeqCst);
-				if let Ok(mut active) = process_state.active_game.lock()
-				{
-					if active.as_ref().is_some_and(|game| game.process_id == process_id) { *active = None; }
-				}
-				hide_overlay(&app_handle);
-				return;
+			if poll == ProcessPoll::Replaced { return; }
+			if let ProcessPoll::Exited(exit_code) = poll {
+				tracing::info!(target: "gamelauncher::game", event = "game_exited", process_id, ?exit_code);
 			}
+			let finished = matches!(poll, ProcessPoll::Exited(_));
+			if finished || !overlay_pending.swap(true, Ordering::SeqCst) {
+				let app = app_handle.clone();
+				let state = process_state.clone();
+				let pending = overlay_pending.clone();
+				let result = app_handle.run_on_main_thread(move || {
+					pending.store(false, Ordering::SeqCst);
+					if state.shutting_down.load(Ordering::SeqCst) { return; }
+					// An old monitor must not hide/reposition a newer game's overlay.
+					let Ok(current) = current_process_id(&state) else { return; };
+					if finished {
+						if current.is_none() && !state.terminating.load(Ordering::SeqCst) { hide_overlay(&app); }
+					} else if current == Some(process_id) && !state.confirming_close.load(Ordering::SeqCst) {
+						let _ = position_normal_overlay(&app);
+					}
+				});
+				if result.is_err() { overlay_pending.store(false, Ordering::SeqCst); }
+			}
+			if finished { return; }
 		}
 	});
 }
@@ -593,7 +652,7 @@ fn focus_process_window(process_id: u32) -> Result<(), String>
 	use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 	use windows::Win32::UI::WindowsAndMessaging::{
 		EnumWindows, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-		SetForegroundWindow, ShowWindow, SW_RESTORE,
+		IsHungAppWindow, SetForegroundWindow, ShowWindowAsync, SW_RESTORE,
 	};
 
 	struct WindowCandidate
@@ -627,8 +686,10 @@ fn focus_process_window(process_id: u32) -> Result<(), String>
 	unsafe { EnumWindows(Some(find_window), LPARAM((&mut candidate as *mut WindowCandidate) as isize)) }
 		.map_err(|error| format!("ゲームウィンドウを検索できません: {error}"))?;
 	let hwnd = candidate.hwnd.ok_or_else(|| "ゲームウィンドウが見つかりません".to_string())?;
+	if unsafe { IsHungAppWindow(hwnd) }.as_bool() { return Err("ゲームウィンドウが応答していません".into()); }
 	if unsafe { IsIconic(hwnd) }.as_bool() {
-		unsafe { let _ = ShowWindow(hwnd, SW_RESTORE); }
+		// Do not synchronously wait for the game's window procedure when it is hung.
+		unsafe { let _ = ShowWindowAsync(hwnd, SW_RESTORE); }
 	}
 	if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
 		return Err("ゲームウィンドウへフォーカスを戻せません".to_string());
@@ -692,28 +753,42 @@ fn set_process_suspended(_process_id: u32, _suspended: bool) -> Result<(), Strin
 
 fn terminate_current_game(process_state: &GameProcessState) -> Result<(), String>
 {
-	process_state.game_suspended.store(false, Ordering::SeqCst);
+	if process_state.terminating.swap(true, Ordering::SeqCst) { return Err("ゲームの終了処理中です".into()); }
+	struct ResetFlag<'a>(&'a AtomicBool);
+	impl Drop for ResetFlag<'_> { fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); } }
+	let _reset = ResetFlag(&process_state.terminating);
+	// Take ownership only briefly. Process waits happen with no state lock held.
 	let mut child = process_state
 		.child
 		.lock()
 		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?
 		.take();
-	*process_state.active_game.lock()
-		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = None;
-	let Some(child) = child.as_mut() else { return Ok(()); };
-	terminate_process_tree(child)
+	if let Some(process) = child.as_mut() {
+		let process_id = process.id();
+		tracing::info!(target: "gamelauncher::game", event = "game_termination_started", process_id);
+		if let Err(error) = terminate_process_tree(process) {
+			*process_state.child.lock().map_err(|_| "ゲーム状態の復元に失敗しました".to_string())? = child;
+			tracing::error!(target: "gamelauncher::game", event = "game_termination_failed", process_id, message = %error);
+			return Err(error);
+		}
+		tracing::info!(target: "gamelauncher::game", event = "game_termination_complete", process_id);
+	}
+	*process_state.active_game.lock().map_err(|_| "ゲームプロセスの状態を取得できません".to_string())? = None;
+	process_state.game_suspended.store(false, Ordering::SeqCst);
+	Ok(())
 }
 
-pub fn terminate_game_if_running(app_handle: &AppHandle, game_id: &str) -> Result<(), String>
+pub async fn terminate_game_if_running(app_handle: &AppHandle, game_id: &str) -> Result<(), String>
 {
-	let process_state = app_handle.state::<GameProcessState>();
+	let process_state = app_handle.state::<GameProcessState>().inner().clone();
+	let _control = process_state.control.lock().await;
 	let is_target_running = process_state.active_game.lock()
 		.map_err(|_| "ゲームプロセスの状態を取得できません".to_string())?
 		.as_ref()
 		.is_some_and(|active| active.game_id == game_id);
 	if is_target_running
 	{
-		terminate_current_game(process_state.inner())?;
+		run_process_operation(process_state.clone(), terminate_current_game).await?;
 		hide_overlay(app_handle);
 	}
 	Ok(())
@@ -729,17 +804,29 @@ fn terminate_process_tree(child: &mut Child) -> Result<(), String>
 		return Ok(());
 	}
 	let process_id = child.id().to_string();
-	let status = Command::new("taskkill")
+	let task = Command::new("taskkill")
 		.args(["/PID", &process_id, "/T", "/F"])
 		.creation_flags(CREATE_NO_WINDOW)
-		.status();
-	if status.as_ref().is_ok_and(|value| value.success()) {
-		let _ = child.wait();
-		Ok(())
-	} else {
-		child.kill().map_err(|e| format!("ゲームを終了できませんでした: {e}"))?;
-		let _ = child.wait();
-		Ok(())
+		.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+		.spawn();
+	if let Ok(mut task) = task {
+		if !wait_for_exit(&mut task, std::time::Duration::from_secs(3))? {
+			let _ = task.kill();
+			tracing::warn!(target: "gamelauncher::game", event = "taskkill_timeout", process_id = child.id());
+		}
+	}
+	if child.try_wait().map_err(|e| e.to_string())?.is_some() { return Ok(()); }
+	child.kill().map_err(|e| format!("ゲームを終了できませんでした: {e}"))?;
+	if wait_for_exit(child, std::time::Duration::from_secs(3))? { Ok(()) }
+	else { Err("ゲームの強制終了が時間内に完了しませんでした。再試行してください".into()) }
+}
+
+fn wait_for_exit(child: &mut Child, timeout: std::time::Duration) -> Result<bool, String> {
+	let deadline = std::time::Instant::now() + timeout;
+	loop {
+		if child.try_wait().map_err(|error| error.to_string())?.is_some() { return Ok(true); }
+		if std::time::Instant::now() >= deadline { return Ok(false); }
+		std::thread::sleep(std::time::Duration::from_millis(20));
 	}
 }
 
@@ -748,7 +835,9 @@ fn terminate_process_tree(child: &mut Child) -> Result<(), String>
 {
 	if child.try_wait().map_err(|e| e.to_string())?.is_none() {
 		child.kill().map_err(|e| format!("ゲームを終了できませんでした: {e}"))?;
-		let _ = child.wait();
+		if !wait_for_exit(child, std::time::Duration::from_secs(3))? {
+			return Err("ゲームの強制終了が時間内に完了しませんでした".into());
+		}
 	}
 	Ok(())
 }
@@ -757,6 +846,103 @@ fn terminate_process_tree(child: &mut Child) -> Result<(), String>
 mod tests
 {
 	use super::*;
+
+	// A real child process used only by these tests, never a user's running game.
+	#[test]
+	#[ignore]
+	fn slow_process_fixture() { std::thread::sleep(std::time::Duration::from_secs(60)); }
+
+	struct TestGame(GameProcessState, u32);
+	impl TestGame {
+		fn start() -> Self {
+			let mut command = Command::new(std::env::current_exe().unwrap());
+			command.args(["--ignored", "--exact", "commands::launch::tests::slow_process_fixture", "--test-threads=1"])
+				.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+			#[cfg(target_os = "windows")]
+			{
+				use std::os::windows::process::CommandExt;
+				command.creation_flags(0x08000000);
+			}
+			let child = command.spawn().unwrap();
+			let process_id = child.id();
+			let state = GameProcessState::default();
+			*state.child.lock().unwrap() = Some(child);
+			*state.active_game.lock().unwrap() = Some(ActiveGame { process_id, game_id: "fixture".into(), session_token: "fixture-token".into() });
+			Self(state, process_id)
+		}
+	}
+	impl Drop for TestGame { fn drop(&mut self) { let _ = terminate_current_game(&self.0); } }
+
+	#[test]
+	fn monitor_releases_all_state_locks_before_ui_work() {
+		let game = TestGame::start();
+		assert_eq!(poll_game_process(&game.0, game.1).unwrap(), ProcessPoll::Running);
+		// Simulate a UI getter callback which reads state; it must not deadlock.
+		assert!(game.0.child.try_lock().is_ok());
+		assert!(game.0.active_game.try_lock().is_ok());
+		assert_eq!(current_process_id(&game.0).unwrap(), Some(game.1));
+		assert_eq!(poll_game_process(&game.0, game.1.wrapping_add(1)).unwrap(), ProcessPoll::Replaced);
+	}
+
+	#[test]
+	fn process_wait_is_bounded_and_does_not_require_game_responses() {
+		let game = TestGame::start();
+		let mut child = game.0.child.lock().unwrap().take().unwrap();
+		assert!(!wait_for_exit(&mut child, std::time::Duration::from_millis(30)).unwrap());
+		*game.0.child.lock().unwrap() = Some(child);
+		#[cfg(target_os = "windows")]
+		set_process_suspended(game.1, true).unwrap();
+		// Suspended processes remain running, but polling and session lookups still work.
+		assert_eq!(poll_game_process(&game.0, game.1).unwrap(), ProcessPoll::Running);
+		assert_eq!(game.0.game_id_for_session("fixture-token").unwrap(), Some("fixture".into()));
+		terminate_current_game(&game.0).unwrap();
+		assert_eq!(current_process_id(&game.0).unwrap(), None);
+		assert_eq!(game.0.game_id_for_session("fixture-token").unwrap(), None);
+		assert!(!game.0.terminating.load(Ordering::SeqCst));
+	}
+
+	#[tokio::test(flavor = "current_thread")]
+	async fn blocking_game_operation_does_not_block_the_async_event_loop() {
+		fn slow_operation(state: &GameProcessState) -> Result<(), String> {
+			assert!(state.child.try_lock().is_ok());
+			std::thread::sleep(std::time::Duration::from_millis(150));
+			Ok(())
+		}
+		let task = tokio::spawn(run_process_operation(GameProcessState::default(), slow_operation));
+		tokio::time::timeout(std::time::Duration::from_millis(100), tokio::time::sleep(std::time::Duration::from_millis(10))).await.unwrap();
+		assert!(!task.is_finished());
+		task.await.unwrap().unwrap();
+	}
+
+	#[test]
+	fn termination_owns_the_child_without_discarding_session_or_stopping_monitoring() {
+		let game = TestGame::start();
+		game.0.terminating.store(true, Ordering::SeqCst);
+		let child = game.0.child.lock().unwrap().take();
+		assert_eq!(poll_game_process(&game.0, game.1).unwrap(), ProcessPoll::Running);
+		assert_eq!(game.0.game_id_for_session("fixture-token").unwrap(), Some("fixture".into()));
+		*game.0.child.lock().unwrap() = child;
+		game.0.terminating.store(false, Ordering::SeqCst);
+	}
+
+	#[test]
+	fn monitor_cleans_up_only_its_exited_game() {
+		let game = TestGame::start();
+		game.0.confirming_close.store(true, Ordering::SeqCst);
+		game.0.game_suspended.store(true, Ordering::SeqCst);
+		{
+			let mut child = game.0.child.lock().unwrap();
+			let process = child.as_mut().unwrap();
+			process.kill().unwrap();
+			assert!(wait_for_exit(process, std::time::Duration::from_secs(2)).unwrap());
+		}
+		assert!(matches!(poll_game_process(&game.0, game.1).unwrap(), ProcessPoll::Exited(_)));
+		assert!(game.0.child.try_lock().unwrap().is_none());
+		assert!(game.0.active_game.try_lock().unwrap().is_none());
+		assert!(!game.0.confirming_close.load(Ordering::SeqCst));
+		assert!(!game.0.game_suspended.load(Ordering::SeqCst));
+		assert_eq!(poll_game_process(&game.0, game.1).unwrap(), ProcessPoll::Replaced);
+	}
 
 	#[test]
 	fn detects_unity_player_layout()
